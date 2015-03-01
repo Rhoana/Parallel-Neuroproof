@@ -234,6 +234,9 @@ void BioStack::build_rag_loop(unordered_map<Label_t, MitoTypeProperty> &mito_pro
                 }
 
                 node->incr_size();
+
+                if (neighbors.size() < 6)
+                    node->incr_boundary_size();
             
                 if (feature_manager) {
                     feature_manager->add_val(predictions, node);
@@ -272,8 +275,12 @@ void BioStack::build_rag_loop(unordered_map<Label_t, MitoTypeProperty> &mito_pro
                 */
 
                 for (set<Label_t>::iterator it = neighbors.begin(); it != neighbors.end(); ++it) {
-                    rag_add_edge(label, *it, predictions);
+                    if ((*it != label) && (labels.find(*it) == labels.end())) {
+                        labels.insert(*it);
+                        rag_add_edge(label, *it, predictions);
+                    }
                 } 
+                labels.clear();
 
                 mu.unlock();            
             }
