@@ -88,7 +88,7 @@ void  FeatureHist::get_diff_feature_array(void* cache2, void * cache1, std::vect
 } 
 
 
-void FeatureHist::merge_cache(void * cache1, void * cache2) {
+void FeatureHist::merge_cache(void * cache1, void * cache2, bool del_cache2) {
         HistCache * hist_cache1 = (HistCache*) cache1;
         HistCache * hist_cache2 = (HistCache*) cache2;
 
@@ -96,7 +96,8 @@ void FeatureHist::merge_cache(void * cache1, void * cache2) {
         for (int i = 0; i <= num_bins; ++i) {
             hist_cache1->hist[i] += hist_cache2->hist[i];
         }
-        delete hist_cache2;
+        if (del_cache2)
+            delete hist_cache2;
 }
 
 double FeatureHist::get_data(HistCache * hist_cache, double threshold) {
@@ -188,7 +189,7 @@ void  FeatureMoment::get_diff_feature_array(void* cache2, void * cache1, std::ve
         }
 } 
 
-void FeatureMoment::merge_cache(void * cache1, void * cache2){
+void FeatureMoment::merge_cache(void * cache1, void * cache2, bool del_cache2){
         MomentCache * moment_cache1 = (MomentCache*) cache1;
         MomentCache * moment_cache2 = (MomentCache*) cache2;
 
@@ -196,7 +197,8 @@ void FeatureMoment::merge_cache(void * cache1, void * cache2){
         for (int i = 0; i < num_moments; ++i) {
             moment_cache1->vals[i] += moment_cache2->vals[i];
         }
-        delete moment_cache2;
+        if (del_cache2)
+            delete moment_cache2;
 }
 
 
@@ -367,13 +369,14 @@ void FeatureCount::get_diff_feature_array(void* cache2, void * cache1, std::vect
     feature_array.push_back(std::abs(count_cache1->count - count_cache2->count));
 } 
 
-void FeatureCount::merge_cache(void * cache1, void * cache2)
+void FeatureCount::merge_cache(void * cache1, void * cache2, bool del_cache2)
 {
     CountCache * count_cache1 = (CountCache*) cache1;
     CountCache * count_cache2 = (CountCache*) cache2;
 
     count_cache1->count += count_cache2->count;
-    delete count_cache2;
+    if (del_cache2)
+        delete count_cache2;
 }
 
 void FeatureCount::print_name()

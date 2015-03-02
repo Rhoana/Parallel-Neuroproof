@@ -18,7 +18,7 @@ class FeatureCompute {
     virtual void  get_feature_array(void* cache, std::vector<double>& feature_array, RagEdge_t* edge, unsigned int node_num) = 0; 
     virtual void  get_diff_feature_array(void* cache2, void * cache1, std::vector<double>& feature_array, RagEdge_t* edge) = 0; 
     // will delete second cache
-    virtual void merge_cache(void * cache1, void * cache2) = 0; 
+    virtual void merge_cache(void * cache1, void * cache2, bool del_cache2 = true) = 0; 
     virtual void print_cache(void* pcache) = 0; 	
     virtual void print_name() = 0; 	
     // serialize feature and combine with bytes if not 0
@@ -38,7 +38,7 @@ class FeatureHist : public FeatureCompute {
     void add_point(double val, void * cache, unsigned int x = 0, unsigned int y = 0, unsigned int z = 0);
     void get_feature_array(void* cache, std::vector<double>& feature_array, RagEdge_t* edge, unsigned int node_num);
     void  get_diff_feature_array(void* cache2, void * cache1, std::vector<double>& feature_array, RagEdge_t* edge);
-    void merge_cache(void * cache1, void * cache2);
+    void merge_cache(void * cache1, void * cache2, bool del_cache2 = true);
     void print_name();	
     void print_cache(void* pcache);
 
@@ -63,7 +63,7 @@ class FeatureMoment : public FeatureCompute {
     void add_point(double val, void * cache, unsigned int x = 0, unsigned int y = 0, unsigned int z = 0);
     void get_feature_array(void* cache, std::vector<double>& feature_array, RagEdge_t* edge, unsigned int node_num);
     void  get_diff_feature_array(void* cache2, void * cache1, std::vector<double>& feature_array, RagEdge_t* edge);
-    void merge_cache(void * cache1, void * cache2);
+    void merge_cache(void * cache1, void * cache2, bool del_cache2 = true);
     void print_name();
     void print_cache(void* pcache);
 
@@ -94,7 +94,7 @@ class FeatureInclusiveness : public FeatureCompute {
     void get_feature_array(void* cache, std::vector<double>& feature_array, RagEdge_t* edge, unsigned int node_num);
     void  get_diff_feature_array(void* cache2, void * cache1, std::vector<double>& feature_array, RagEdge_t* edge);
 
-    void merge_cache(void * cache1, void * cache2)
+    void merge_cache(void * cache1, void * cache2, bool del_cache2)
     {
         return;
     }
@@ -131,7 +131,7 @@ class FeatureCount : public FeatureCompute {
 
     void  get_diff_feature_array(void* cache2, void * cache1, std::vector<double>& feature_array, RagEdge_t* edge);
 
-    void merge_cache(void * cache1, void * cache2);
+    void merge_cache(void * cache1, void * cache2, bool del_cache2 = true);
     
     void print_name();
     void print_cache(void *pcache) {}	

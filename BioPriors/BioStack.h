@@ -32,7 +32,7 @@ class BioStack : public Stack {
     
     void set_edge_locations();
 
-    void build_rag_loop(std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
+    void build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
             int x_start, int x_end, int y_start, int y_end, int z_start, int z_end);
 
     virtual void build_rag();

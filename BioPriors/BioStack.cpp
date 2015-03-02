@@ -128,7 +128,7 @@ void BioStack::save_classifier(std::string clfr_name)
 }
 
 
-void BioStack::build_rag_loop(unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
+void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
                                             int x_start, int x_end, int y_start, int y_end, int z_start, int z_end)
 {
     unordered_set<Label_t> labels;
@@ -277,7 +277,29 @@ void BioStack::build_rag_loop(unordered_map<Label_t, MitoTypeProperty> &mito_pro
                 for (set<Label_t>::iterator it = neighbors.begin(); it != neighbors.end(); ++it) {
                     if ((*it != label) && (labels.find(*it) == labels.end())) {
                         labels.insert(*it);
-                        rag_add_edge(label, *it, predictions);
+                        // rag_add_edge(label, *it, predictions);
+                        RagNode_t * node1 = rag->find_rag_node(label);
+                        if (!node1) {
+                            node1 = rag->insert_rag_node(label);
+                        }
+                        
+                        RagNode_t * node2 = rag->find_rag_node(*it);
+                        if (!node2) {
+                            node2 = rag->insert_rag_node(*it);
+                        }
+                       
+                        assert(node1 != node2);
+
+                        RagEdge_t* edge = rag->find_rag_edge(node1, node2);
+                        if (!edge) {
+                            edge = rag->insert_rag_edge(node1, node2);
+                        }
+
+                        if (feature_man) {
+                            feature_man->add_val(predictions, edge);
+                        }
+
+                        edge->incr_size();
                     }
                 } 
                 labels.clear();
@@ -296,6 +318,34 @@ void BioStack::build_rag_loop(unordered_map<Label_t, MitoTypeProperty> &mito_pro
 
 void test_cilk(vector<int> &data, int num) {
     data.push_back(num);
+}
+
+
+
+void merge_feature_managers (FeatureMgrPtr fm1, FeatureMgrPtr fm2) {
+    // absorb fm2 into fm1
+    EdgeCaches &ec1 = fm1->get_edge_cache();
+    EdgeCaches &ec2 = fm2->get_edge_cache();
+    for (EdgeCaches::iterator it = ec2.begin(); it != ec2.end(); ++it) {
+        EdgeCaches::iterator found = ec1.find(it->first);
+        if (found != ec1.end()) {
+            unsigned int pos = 0;
+            unsigned int num_chan = fm1->get_num_channels();
+            for (int i = 0; i < num_chan; ++i) {
+                vector<FeatureCompute*>& features = fm1->get_channel_features()[i];
+                for (int j = 0; j < features.size(); ++j) {
+                    if ((found->second)[pos] && (it->second)[pos]) {
+                        features[j]->merge_cache((found->second)[pos], (it->second)[pos], false);
+                    }
+                    ++pos;
+                }
+            }
+        } else {
+            RagEdge_t* new_edge = RagEdge_t::New(*it->first);
+            ec1[new_edge] = it->second;
+            it->second = std::vector<void *>();
+        }
+    }
 }
 
 
@@ -342,10 +392,24 @@ void BioStack::build_rag()
     // cilk_spawn build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_half, z_half + z_fourth);
     // build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_half + z_fourth, z_full);
 
-    cilk_spawn build_rag_loop(mito_probs, 0, x_full, 0, y_full, 0, z_half);
-    build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_half, z_full);
+    FeatureMgrPtr feature_manager2(new FeatureMgr(prob_list.size()));    
+    feature_manager2->set_basic_features();
+
+    cilk_spawn build_rag_loop(feature_manager2, mito_probs, 0, x_full, 0, y_full, 0, z_half);
+    build_rag_loop(feature_manager, mito_probs, 0, x_full, 0, y_full, z_half, z_full);
 
     cilk_sync;
+
+    // EdgeCaches &ec = feature_manager->get_edge_cache();
+    // for (EdgeCaches::iterator it = ec.begin(); it != ec.end(); ++it) {
+    //     cout << it->second.size() << endl;
+    // }
+
+    // cout << "CHECK2" << endl;
+
+    merge_feature_managers (feature_manager, feature_manager2);
+
+    cout << "DEBUG 5" << endl;
 
     // build_rag_loop(mito_probs, 0, x_full, 0, y_full, 0, z_full);
 
@@ -431,6 +495,7 @@ void BioStack::build_rag()
         (*iter)->set_property("mito-type", mtype);
     }
     //printf("Done Biostack rag, largest: %u\n", largest_id);
+    cout << "DEBUG 6" << endl;
 }
 
 

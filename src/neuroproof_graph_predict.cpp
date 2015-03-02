@@ -140,7 +140,7 @@ void run_prediction(PredictOptions& options)
     start = boost::posix_time::microsec_clock::local_time();
     cout<<"Building RAG ..."; 	
     stack.build_rag();
-    cout<<"done with "<< stack.get_num_labels()<< " nodes\n";	
+    cout<<"done with "<< stack.get_num_labels()<< " nodes\n";
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO BUILD RAG: " << (now - start).total_milliseconds() << " ms\n";
    
