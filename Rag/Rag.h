@@ -69,6 +69,7 @@ class Rag {
      * \return pointer to new rag node
     */
     RagNode<Region>* insert_rag_node(Region region);
+    void insert_rag_node(RagNode<Region>* region);
   
     /*!
      * Find rag edge given two unique node identifiers believed to have
@@ -107,6 +108,7 @@ class Rag {
      * \param rag_edge pointer to rag edge to be removed
     */
     void remove_rag_edge(RagEdge<Region>* rag_edge);
+    void remove_rag_edge_only(RagEdge<Region>* rag_edge);
 
     /*!
      * Retrieves the number of nodes stored in the rag
@@ -323,6 +325,13 @@ template <typename Region> inline RagNode<Region>* Rag<Region>::insert_rag_node(
     rag_nodes.insert(node);
     return node;
 }
+
+// inlined functions
+template <typename Region> inline void Rag<Region>::insert_rag_node(RagNode<Region>* node)
+{
+    rag_nodes.insert(node);
+}
+
 template <typename Region> inline RagEdge<Region>* Rag<Region>::insert_rag_edge(RagNode<Region>* rag_node1, RagNode<Region>* rag_node2)
 {
     RagEdge<Region>* edge = RagEdge<Region>::New(rag_node1, rag_node2);
@@ -433,6 +442,20 @@ template <typename Region> inline void Rag<Region>::remove_rag_node(RagNode<Regi
     rag_nodes.erase(rag_node);
     delete rag_node;
 }
+
+
+template <typename Region> inline void Rag<Region>::remove_rag_edge_only(RagEdge<Region>* rag_edge)
+{
+    typename EdgeHash::iterator rag_edge_iter = rag_edges.find(rag_edge);
+    if (rag_edge_iter == rag_edges.end()) {
+        throw ErrMsg("edge does not exist");
+    }
+
+    rag_edges.erase(rag_edge);
+
+    delete rag_edge;
+}
+
 
 template <typename Region> inline void Rag<Region>::remove_rag_edge(RagEdge<Region>* rag_edge)
 {

@@ -10,6 +10,7 @@
 
 #include <time.h>
 #include <boost/thread/mutex.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <pthread.h>
 
 using std::tr1::unordered_set;
@@ -28,6 +29,10 @@ boost::mutex problist_mu;
 // pthread_mutex_t labelvol_mu;
 // pthread_mutex_t problist_mu;
 
+void move_node_feature (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagNode_t* node1, RagNode_t* node2);
+void move_edge_feature (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagEdge_t* edge1, RagEdge_t* edge2);
+void merge_node_features (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagNode_t* node1, RagNode_t* node2);
+void merge_edge_features (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagEdge_t* edge1, RagEdge_t* edge2);
 
 VolumeLabelPtr BioStack::create_syn_label_volume()
 {
@@ -128,7 +133,7 @@ void BioStack::save_classifier(std::string clfr_name)
 }
 
 
-void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
+void BioStack::build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
                                             int x_start, int x_end, int y_start, int y_end, int z_start, int z_end)
 {
     unordered_set<Label_t> labels;
@@ -140,8 +145,6 @@ void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_ma
     unordered_set<Label_t> their_labels_set;
 
     map<pair<Label_t, Label_t>, vector<vector<double> > > edge_to_pred_map;
-
-    RagPtr my_temp_rag = RagPtr(new Rag_t());
 
     // cilk_for (int z = z_start; z < z_end; z++) {
     for (int z = z_start; z < z_end; z++) {    
@@ -155,39 +158,6 @@ void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_ma
                     // labelvol_mu.unlock();
                     continue;
                 }
-
-
-
-                /*
-                if (my_labels_set.find(label) == my_labels_set.end()) {
-                    // if we know this belongs to someone else
-                    if (their_labels_set.find(label) != their_labels_set.end())
-                        continue;
-
-                    bool claimed = false;
-                    global_labels_set_mu.lock();
-                    if (global_labels_set.find(label) == global_labels_set.end()) {
-                        global_labels_set.insert(label);
-                    } else {
-                        claimed = true;
-                    }
-                    global_labels_set_mu.unlock();
-
-                    if (claimed) {
-                        their_labels_set.insert(label);
-                        // continue;
-                    } else {
-                        my_labels_set.insert(label);
-                    }
-                }
-                */
-
-                RagNode_t * temp_node = rag->find_rag_node(label);
-
-                if (!temp_node)
-                    temp_node = my_temp_rag->insert_rag_node(label);
-
-                temp_node->incr_size();
 
 
                 /*
@@ -238,8 +208,8 @@ void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_ma
                 if (neighbors.size() < 6)
                     node->incr_boundary_size();
             
-                if (feature_manager) {
-                    feature_manager->add_val(predictions, node);
+                if (feature_man) {
+                    feature_man->add_val(predictions, node);
                 }
                 mito_probs[label].update(predictions); 
 
@@ -307,18 +277,198 @@ void BioStack::build_rag_loop(FeatureMgrPtr &feature_man, std::tr1::unordered_ma
                 mu.unlock();            
             }
     }
-    // cout << "LABELS: ";
-    // for (unordered_set<Label_t>::iterator it = my_labels_set.begin(); it != my_labels_set.end(); ++it) {
-    //     cout << ", " << *it;
-    // }
-
-    my_temp_rag.reset();
 }
 
 
 void test_cilk(vector<int> &data, int num) {
     data.push_back(num);
 }
+
+
+
+
+
+
+
+
+void move_node_feature (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagNode_t* node1, RagNode_t* node2) {
+    // cout << "Move Node" << endl;
+    node1->set_size(node2->get_size());
+    node1->set_boundary_size(node2->get_boundary_size());
+    NodeCaches &nc1 = fm1->get_node_cache();
+    NodeCaches &nc2 = fm2->get_node_cache();
+    NodeCaches::iterator node_feat2 = nc2.find(node2);
+    assert(node_feat2 != nc2.end());
+    nc1[node1] = nc2[node2];
+    nc2[node2] = std::vector<void *>();
+    // fm1->add_val(0.0, node1);
+    // merge_node_features(fm1, fm2, node1, node2);
+}
+
+
+
+
+
+
+
+
+
+void move_edge_feature (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagEdge_t* edge1, RagEdge_t* edge2) {
+    // cout << "Move Edge" << endl;
+    edge1->set_size(edge2->get_size()); 
+    EdgeCaches &ec1 = fm1->get_edge_cache();
+    EdgeCaches &ec2 = fm2->get_edge_cache();
+    EdgeCaches::iterator edge_feat2 = ec2.find(edge2);
+    assert(edge_feat2 != ec2.end());
+    ec1[edge1] = ec2[edge2];
+    ec2[edge2] = std::vector<void *>();
+    // fm1->add_val(0.0, edge1);
+    // merge_edge_features(fm1, fm2, edge1, edge2);
+}
+
+
+
+
+
+
+
+
+
+
+
+void merge_node_features (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagNode_t* node1, RagNode_t* node2) {
+    // cout << "Merge Node" << endl;
+    NodeCaches &nc1 = fm1->get_node_cache();
+    NodeCaches &nc2 = fm2->get_node_cache();
+    if (nc2.find(node2) == nc2.end()) {
+        return;
+    }
+    if (nc1.find(node1) == nc1.end()) {
+        move_node_feature(fm1, fm2, node1, node2);
+        return;
+    }
+    node1->incr_size(node2->get_size());
+    node1->incr_boundary_size(node2->get_boundary_size());
+    unsigned int pos = 0;
+    unsigned int num_chan = fm1->get_num_channels();
+    // cout << "Node 2: " << node2->get_node_id() << endl;
+    for (int i = 0; i < num_chan; ++i) {
+        vector<FeatureCompute*>& features = fm1->get_channel_features()[i];
+        for (int j = 0; j < features.size(); ++j) {
+            if (nc1[node1][pos] && nc2[node2][pos]) {
+                features[j]->merge_cache(nc1[node1][pos], nc2[node2][pos], false);
+            }
+            ++pos;
+        }
+    }
+}
+
+
+
+
+
+
+
+void merge_edge_features (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagEdge_t* edge1, RagEdge_t* edge2) {
+    // cout << "Merge Edge" << endl;
+    edge1->incr_size(edge2->get_size());
+    EdgeCaches &ec1 = fm1->get_edge_cache();
+    EdgeCaches &ec2 = fm2->get_edge_cache();
+    unsigned int pos = 0;
+    unsigned int num_chan = fm1->get_num_channels();
+    for (int i = 0; i < num_chan; ++i) {
+        vector<FeatureCompute*>& features = fm1->get_channel_features()[i];
+        for (int j = 0; j < features.size(); ++j) {
+            if (ec1[edge1][pos] && ec2[edge2][pos]) {
+                features[j]->merge_cache(ec1[edge1][pos], ec2[edge2][pos], false);
+            }
+            ++pos;
+        }
+    }    
+}
+
+
+
+
+
+
+
+
+void merge_rags_new (RagPtr &rag1, RagPtr &rag2, FeatureMgrPtr fm1, FeatureMgrPtr fm2) {
+    EdgeCaches &ec1 = fm1->get_edge_cache();
+    EdgeCaches &ec2 = fm2->get_edge_cache();
+    NodeCaches &nc1 = fm1->get_node_cache();
+    NodeCaches &nc2 = fm2->get_node_cache();
+
+    for (Rag_t::nodes_iterator it1 = rag2->nodes_begin(); it1 != rag2->nodes_end(); ++it1) {
+        RagNode_t * node1 = rag1->find_rag_node((*it1)->get_node_id());
+        node1->incr_size((*it1)->get_size());
+        merge_node_features(fm1, fm2, node1, *it1);
+    }
+
+    for (Rag_t::edges_iterator it1 = rag2->edges_begin(); it1 != rag2->edges_end(); ++it1) {
+        RagEdge_t * edge1 = rag1->find_rag_edge((*it1)->get_node1(), (*it1)->get_node2());
+        edge1->incr_size((*it1)->get_size());
+        merge_edge_features(fm1, fm2, edge1, *it1);
+    }
+}
+
+
+
+
+
+
+
+
+
+void merge_rags (RagPtr &rag1, RagPtr &rag2, FeatureMgrPtr fm1, FeatureMgrPtr fm2) {
+    set<Label_t> processed;
+    for (Rag_t::nodes_iterator it1 = rag2->nodes_begin(); it1 != rag2->nodes_end(); ++it1) {
+        assert(processed.find((*it1)->get_node_id()) == processed.end());
+        RagNode_t * node1 = rag1->find_rag_node((*it1)->get_node_id());
+        if (!node1) {
+            // if not, insert the node and its incident edges
+            RagNode_t* new_node = rag1->insert_rag_node((*it1)->get_node_id());
+            move_node_feature(fm1, fm2, new_node, *it1);
+            assert(fm1->get_node_cache().find(new_node) != fm1->get_node_cache().end());
+            for (RagNode_t::edge_iterator it2 = (*it1)->edge_begin(); it2 != (*it1)->edge_end(); ++it2) {
+                RagNode_t* terminal_node = (*it2)->get_other_node(*it1);
+                node1 = rag1->find_rag_node(terminal_node->get_node_id());
+                if (node1) {
+                    // add edge and update node
+                    RagEdge_t* new_edge = rag1->insert_rag_edge(node1, new_node);
+                    move_edge_feature(fm1, fm2, new_edge, *it2);
+                    assert(fm1->get_edge_cache().find(new_edge) != fm1->get_edge_cache().end());
+                }
+            }
+        } else {
+            // merge size. go thru neighbors. if not processed and in rag1, update edge.
+            assert(processed.find(node1->get_node_id()) == processed.end());
+            merge_node_features(fm1, fm2, node1, *it1);
+            for (RagNode_t::edge_iterator it2 = (*it1)->edge_begin(); it2 != (*it1)->edge_end(); ++it2) {
+                RagNode_t* terminal_node = (*it2)->get_other_node(*it1);
+                RagNode_t* node2 = rag1->find_rag_node(terminal_node->get_node_id()); 
+                if (node2) {
+                    if (processed.find(node2->get_node_id()) == processed.end()) {
+                        RagEdge_t* new_edge = rag1->find_rag_edge(node1->get_node_id(), node2->get_node_id());
+                        if (new_edge) {
+                            // if edge is already there
+                            merge_edge_features(fm1, fm2, new_edge, *it2);
+                        } else {
+                            new_edge = rag1->insert_rag_edge(node1, node2);
+                            move_edge_feature(fm1, fm2, new_edge, *it2);
+                        }
+                    }
+                }
+            }
+        }
+        processed.insert((*it1)->get_node_id());
+    }
+}
+
+
+
+
 
 
 
@@ -347,6 +497,135 @@ void merge_feature_managers (FeatureMgrPtr fm1, FeatureMgrPtr fm2) {
         }
     }
 }
+
+
+
+
+
+
+
+
+void print_this_fm(FeatureMgrPtr fm) {
+    NodeCaches nodes = fm->get_node_cache();
+    EdgeCaches edges = fm->get_edge_cache();
+
+    cout << "EDGE SIZE: " << edges.size() << endl;    
+    cout << "NODE SIZE: " << nodes.size() << endl;  
+
+    cout << "Node Features: " << endl;
+    for (NodeCaches::iterator it = nodes.begin(); it != nodes.end(); ++it) {
+        fm->print_cache(it->first);
+    }
+
+    cout << "Edge Features: " << endl;
+    for (EdgeCaches::iterator it = edges.begin(); it != edges.end(); ++it) {
+        fm->print_cache(it->first);
+    }
+}
+
+
+
+
+
+
+
+
+void BioStack::print_fm() {
+    NodeCaches nodes = feature_manager->get_node_cache();
+    EdgeCaches edges = feature_manager->get_edge_cache();
+
+    cout << "EDGE SIZE: " << edges.size() << endl;    
+    cout << "NODE SIZE: " << nodes.size() << endl;
+
+    cout << "Node Features: " << endl;
+    for (NodeCaches::iterator it = nodes.begin(); it != nodes.end(); ++it) {
+        feature_manager->print_cache(it->first);
+    }
+    cout << "Edge Features: " << endl;
+    for (EdgeCaches::iterator it = edges.begin(); it != edges.end(); ++it) {
+        feature_manager->print_cache(it->first);
+    }
+}
+
+
+
+
+
+
+
+
+void print_this_rag(RagPtr rag) {
+    cout << endl;
+    cout << "RAG SIZE:        " << rag->get_rag_size() << endl;
+    cout << "RAG NUM REGIONS: " << rag->get_num_regions() << endl;
+    cout << "RAG NUM EDGES:   " << rag->get_num_edges() << endl;
+    map<Label_t, vector<Label_t> > my_map;
+    for (Rag_t::nodes_iterator it1 = rag->nodes_begin(); it1 != rag->nodes_end(); ++it1) {
+        my_map[(*it1)->get_node_id()] = vector<Label_t>();  
+        for (RagNode_t::edge_iterator it2 = (*it1)->edge_begin(); it2 != (*it1)->edge_end(); ++it2) {
+            RagNode_t* terminal_node = (*it2)->get_other_node(*it1);
+            RagNode_t* node2 = rag->find_rag_node(terminal_node->get_node_id());
+            RagEdge_t* new_edge = rag->find_rag_edge((*it1), node2);
+            if (new_edge) {
+                assert(node2 == terminal_node);
+                my_map[(*it1)->get_node_id()].push_back(node2->get_node_id());
+            }
+            else
+                my_map[(*it1)->get_node_id()].push_back(9999);
+        }
+    }
+    for (map<Label_t, vector<Label_t> >::iterator it1 = my_map.begin(); it1 != my_map.end(); ++it1) {
+        cout << "NODE " << it1->first << ": " << "Boundary Size: " << rag->find_rag_node(it1->first)->get_boundary_size() << ", ";
+        sort (it1->second.begin(), it1->second.end());
+        for (vector<Label_t>::iterator it2 = it1->second.begin(); it2 != it1->second.end(); ++it2) 
+            cout << *it2 << " ";
+        cout << endl;
+    }
+}
+
+
+
+
+
+
+
+void BioStack::print_rag() {
+    cout << endl;
+    cout << "RAG SIZE:        " << rag->get_rag_size() << endl;
+    cout << "RAG NUM REGIONS: " << rag->get_num_regions() << endl;
+    cout << "RAG NUM EDGES:   " << rag->get_num_edges() << endl;
+    map<Label_t, vector<Label_t> > my_map;
+    for (Rag_t::nodes_iterator it1 = rag->nodes_begin(); it1 != rag->nodes_end(); ++it1) {
+        my_map[(*it1)->get_node_id()] = vector<Label_t>();  
+        for (RagNode_t::edge_iterator it2 = (*it1)->edge_begin(); it2 != (*it1)->edge_end(); ++it2) {
+            RagNode_t* terminal_node = (*it2)->get_other_node(*it1);
+            RagNode_t* node2 = rag->find_rag_node(terminal_node->get_node_id());
+            RagEdge_t* new_edge = rag->find_rag_edge((*it1), node2);
+            assert(new_edge == *it2);
+            if (new_edge) {
+                assert(node2 == terminal_node);
+                my_map[(*it1)->get_node_id()].push_back(node2->get_node_id());
+            }
+            else
+                my_map[(*it1)->get_node_id()].push_back(9999);
+        }
+    }
+    for (map<Label_t, vector<Label_t> >::iterator it1 = my_map.begin(); it1 != my_map.end(); ++it1) {
+        cout << "NODE " << it1->first << ": " << "Boundary Size: " << rag->find_rag_node(it1->first)->get_boundary_size() << ", ";
+        sort (it1->second.begin(), it1->second.end());
+        for (vector<Label_t>::iterator it2 = it1->second.begin(); it2 != it1->second.end(); ++it2) 
+            cout << *it2 << " ";
+        cout << endl;
+    }
+}
+
+
+
+
+
+
+
+
 
 
 void BioStack::build_rag()
@@ -395,32 +674,35 @@ void BioStack::build_rag()
     FeatureMgrPtr feature_manager2(new FeatureMgr(prob_list.size()));    
     feature_manager2->set_basic_features();
 
-    cilk_spawn build_rag_loop(feature_manager2, mito_probs, 0, x_full, 0, y_full, 0, z_half);
-    build_rag_loop(feature_manager, mito_probs, 0, x_full, 0, y_full, z_half, z_full);
+    RagPtr rag2 = RagPtr(new Rag_t());
 
-    cilk_sync;
+    build_rag_loop(rag2, feature_manager2, mito_probs, 0, x_full, 0, y_full, 0, z_half);
+    build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, z_half, z_full);
+    
 
-    // EdgeCaches &ec = feature_manager->get_edge_cache();
-    // for (EdgeCaches::iterator it = ec.begin(); it != ec.end(); ++it) {
-    //     cout << it->second.size() << endl;
-    // }
-
-    // cout << "CHECK2" << endl;
-
-    merge_feature_managers (feature_manager, feature_manager2);
-
-    cout << "DEBUG 5" << endl;
-
-    // build_rag_loop(mito_probs, 0, x_full, 0, y_full, 0, z_full);
-
-    // vector<int> data;
-    // cilk_spawn test_cilk(data, 5);
-    // test_cilk(data, 10);
+    // cilk_spawn build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, 0, z_half);
+    // build_rag_loop(rag2, feature_manager2, mito_probs, 0, x_full, 0, y_full, z_half, z_full);
 
     // cilk_sync;
 
-    // for (vector<int>::iterator it = data.begin(); it != data.end(); ++it)
-    //     cout << "DATA: " << *it << endl;
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
+    // print_this_rag(rag);
+    // print_this_rag(rag2);
+    merge_rags(rag, rag2, feature_manager, feature_manager2);
+
+    boost::posix_time::ptime end = boost::posix_time::microsec_clock::local_time();
+
+    cout << endl << "---------------------- TIME TO MERGE: " << (end - start).total_milliseconds() << " ms\n";
+
+    // build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, 0, z_full);
+
+    cout << "POST FM NODE SIZE: " << feature_manager->get_node_cache().size() << endl;
+    cout << "POST FM EDGE SIZE: " << feature_manager->get_edge_cache().size() << endl;
+
+    // print_this_rag(rag);
+    // print_this_rag(rag2);
+
+    // print_this_fm(feature_manager);
 
 
     /*
@@ -495,7 +777,6 @@ void BioStack::build_rag()
         (*iter)->set_property("mito-type", mtype);
     }
     //printf("Done Biostack rag, largest: %u\n", largest_id);
-    cout << "DEBUG 6" << endl;
 }
 
 

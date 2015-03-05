@@ -143,13 +143,20 @@ void run_prediction(PredictOptions& options)
     cout<<"done with "<< stack.get_num_labels()<< " nodes\n";
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO BUILD RAG: " << (now - start).total_milliseconds() << " ms\n";
-   
+
+    // stack.print_rag();
+
     // add synapse constraints (send json to stack function)
     if (options.synapse_filename != "") {   
         stack.set_synapse_exclusions(options.synapse_filename.c_str());
     }
     
+    // stack.print_fm();
+
     remove_inclusions(stack);
+
+    // stack.print_rag();
+    // stack.print_fm();
     
     start = boost::posix_time::microsec_clock::local_time();
     switch (options.agglo_type) {
