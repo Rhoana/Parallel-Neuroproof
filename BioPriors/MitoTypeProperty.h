@@ -35,11 +35,18 @@ class MitoTypeProperty {
     }	
     int get_node_type() {return node_type;}
 
-  private:
-    int node_type;
-    double sum_mitop;	
+
+    void merge(MitoTypeProperty prob2) {
+        npixels   += prob2.npixels;
+        sum_mitop += prob2.sum_mitop;
+    }
+
+    double sum_mitop;   
     double npixels;
-    int mito_channel;    
+    int mito_channel; 
+
+  private:
+    int node_type;   
 };
 }
 

@@ -236,7 +236,6 @@ void Stack::build_rag()
         }
         labels.clear();
     }
- 
 //     fclose(fp);
 
 

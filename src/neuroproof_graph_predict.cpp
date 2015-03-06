@@ -117,7 +117,7 @@ void run_prediction(PredictOptions& options)
     cout << "Read watershed" << endl;
 
     boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
-    // cout << endl << "------------------------ TIME TO LOAD DATA: " << (now - start).total_milliseconds() << " ms\n";
+    cout << endl << "------------------------ TIME TO LOAD DATA: " << (now - start).total_milliseconds() << " ms\n";
     
     // TODO: move feature handling to stack (load classifier if file provided)
     // create feature manager and load classifier
@@ -183,7 +183,7 @@ void run_prediction(PredictOptions& options)
         default: throw ErrMsg("Illegal agglomeration type specified");
     }
     now = boost::posix_time::microsec_clock::local_time();
-    cout << endl << "===> TIME TO AGGLOMERATE: " << (now - start).total_milliseconds() << " ms\n";
+    cout << endl << "---------------------- TIME TO AGGLOMERATE: " << (now - start).total_milliseconds() << " ms\n";
 
     cout << "Done with "<< stack.get_num_labels()<< " regions\n";
    
@@ -227,9 +227,11 @@ void run_prediction(PredictOptions& options)
 	eclfr = new OpencvRFclassifier(options.postseg_classifier_filename.c_str());	
     
     feature_manager->clear_features();
-    feature_manager->set_classifier(eclfr);   	 
+    feature_manager->set_classifier(eclfr);   	
+    now = boost::posix_time::microsec_clock::local_time(); 
     stack.Stack::build_rag();
-    
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "---------------------- TIME TO BUILD RAG (2nd time): " << (now - start).total_milliseconds() << " ms\n";
 
     // add synapse constraints (send json to stack function)
     if (options.synapse_filename != "") {   
