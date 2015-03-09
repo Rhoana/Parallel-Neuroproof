@@ -139,7 +139,7 @@ void run_prediction(PredictOptions& options)
 
     start = boost::posix_time::microsec_clock::local_time();
     cout<<"Building RAG ..."; 	
-    stack.build_rag();
+    stack.build_rag(false);
     cout<<"done with "<< stack.get_num_labels()<< " nodes\n";
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO BUILD RAG: " << (now - start).total_milliseconds() << " ms\n";
@@ -196,7 +196,10 @@ void run_prediction(PredictOptions& options)
         cout << "Done with "<< stack.get_num_labels() << " regions\n";
     }
     
+
+    start = boost::posix_time::microsec_clock::local_time();
     remove_inclusions(stack);
+
 
     if (options.merge_mito){
 	cout<<"Merge Mitochondria (border-len) ..."; 
@@ -215,6 +218,8 @@ void run_prediction(PredictOptions& options)
                         options.watershed_threshold, synapse_labels);
         cout << num_removed << " removed" << endl;	
     }
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "---------------------- TIME TO REMOVE INCLUSION AND SMALL BODIES: " << (now - start).total_milliseconds() << " ms\n";
 
     if (options.postseg_classifier_filename == "") {
         options.postseg_classifier_filename = options.classifier_filename;
@@ -228,8 +233,9 @@ void run_prediction(PredictOptions& options)
     
     feature_manager->clear_features();
     feature_manager->set_classifier(eclfr);   	
-    now = boost::posix_time::microsec_clock::local_time(); 
-    stack.Stack::build_rag();
+    start = boost::posix_time::microsec_clock::local_time(); 
+    // stack.Stack::build_rag();
+    stack.build_rag(false);
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO BUILD RAG (2nd time): " << (now - start).total_milliseconds() << " ms\n";
 
@@ -238,8 +244,11 @@ void run_prediction(PredictOptions& options)
         stack.set_synapse_exclusions(options.synapse_filename.c_str());
     }
         
+    start = boost::posix_time::microsec_clock::local_time();    
     stack.serialize_stack(options.output_filename.c_str(),
                 options.graph_filename.c_str(), options.location_prob);
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "---------------------- TIME TO SERIALIZE: " << (now - start).total_milliseconds() << " ms\n";
 
     delete eclfr;
 }

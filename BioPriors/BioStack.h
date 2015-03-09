@@ -35,9 +35,15 @@ class BioStack : public Stack {
     void print_rag();
     void print_fm();
     void build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
-            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end);
+            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob = true);
 
-    virtual void build_rag();
+    void cilk_build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
+            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob = true);
+
+    void build_rag_recurse (RagPtr &rag, FeatureMgrPtr &fm, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
+                        int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob = true);
+
+    virtual void build_rag(bool use_mito_prob = true);
 
     void add_edge_constraint(RagPtr rag, VolumeLabelPtr labelvol, unsigned int x1,
             unsigned int y1, unsigned int z1, unsigned int x2, unsigned int y2, unsigned int z2);

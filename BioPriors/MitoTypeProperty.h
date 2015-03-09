@@ -14,7 +14,8 @@ class MitoTypeProperty {
     void update(std::vector<double>& predictions)
     {
         double mitop = predictions[mito_channel];
-
+        if (mitop > 1.0)
+            mitop = 1.0;
         sum_mitop += mitop; 
         npixels++;
     }        

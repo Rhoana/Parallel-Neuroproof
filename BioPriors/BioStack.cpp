@@ -19,11 +19,12 @@ using std::tr1::unordered_map;
 using std::vector;
 
 
+#define BLOCK_SIZE_LIMIT 50
 namespace NeuroProof {
 
-boost::mutex global_labels_set_mu;
-boost::mutex mu;
-boost::mutex labelvol_mu;
+// boost::mutex global_labels_set_mu;
+// boost::mutex mu;
+// boost::mutex labelvol_mu;
 
 
 void move_node_feature (FeatureMgrPtr fm1, FeatureMgrPtr fm2, RagNode_t* node1, RagNode_t* node2);
@@ -162,9 +163,9 @@ inline void insert_rag_edge (RagPtr rag, Label_t label1, Label_t label2, Feature
 
 
 
-/*
+
 void BioStack::build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &mito_probs, 
-                                            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end)
+                                            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob)
 {
     unordered_set<Label_t> labels;
     vector<double> predictions(prob_list.size(), 0.0);
@@ -193,21 +194,6 @@ void BioStack::build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1:
                 if (y < maxy) label5 = (*labelvol)(x,y+1,z);
                 if (z > 0) label6 = (*labelvol)(x,y,z-1);
                 if (z < maxz) label7 = (*labelvol)(x,y,z+1);
-                
-
-                // set<Label_t> neighbors;
-                // if (x > 0)
-                //     neighbors.insert((*labelvol)(x-1,y,z));
-                // if (x < maxx)
-                //     neighbors.insert((*labelvol)(x+1,y,z));
-                // if (y > 0)
-                //     neighbors.insert((*labelvol)(x,y-1,z)); 
-                // if (y < maxy)
-                //     neighbors.insert((*labelvol)(x,y+1,z));
-                // if (z > 0)
-                //     neighbors.insert((*labelvol)(x,y,z-1));
-                // if (z < maxz)
-                //     neighbors.insert((*labelvol)(x,y,z+1));
 
 
                 for (unsigned int i = 0; i < prob_list.size(); ++i) {
@@ -222,15 +208,13 @@ void BioStack::build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1:
                 }
 
                 node->incr_size();
-
-                // if (neighbors.size() < 6)
-                //     node->incr_boundary_size();
             
                 if (feature_man) {
                     feature_man->add_val(predictions, node);
                 }
 
-                mito_probs[label].update(predictions); 
+                if (use_mito_prob)
+                    mito_probs[label].update(predictions); 
 
 
                 if (label2 && (label != label2)) {
@@ -266,50 +250,19 @@ void BioStack::build_rag_loop(RagPtr &rag, FeatureMgrPtr &feature_man, std::tr1:
                 if (!label2 || !label3 || !label4 || !label5 || !label6 || !label7) {
                     node->incr_boundary_size();
                 }
-                labels.clear();    
-            
-
-                // for (set<Label_t>::iterator it = neighbors.begin(); it != neighbors.end(); ++it) {
-                //     if ((*it != label) && (labels.find(*it) == labels.end())) {
-                //         labels.insert(*it);
-                //         // rag_add_edge(label, *it, predictions);
-                //         RagNode_t * node1 = rag->find_rag_node(label);
-                //         if (!node1) {
-                //             node1 = rag->insert_rag_node(label);
-                //         }
-                        
-                //         RagNode_t * node2 = rag->find_rag_node(*it);
-                //         if (!node2) {
-                //             node2 = rag->insert_rag_node(*it);
-                //         }
-                       
-                //         assert(node1 != node2);
-
-                //         RagEdge_t* edge = rag->find_rag_edge(node1, node2);
-                //         if (!edge) {
-                //             edge = rag->insert_rag_edge(node1, node2);
-                //         }
-
-                //         if (feature_man) {
-                //             feature_man->add_val(predictions, edge);
-                //         }
-
-                //         edge->incr_size();
-                //     }
-                // } 
-                // labels.clear();          
+                labels.clear();        
             }
         }
     }
 }
-*/
 
 
 
 
 
-void BioStack::build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &ret_mito_probs, 
-                                            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end)
+
+void BioStack::cilk_build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, std::tr1::unordered_map<Label_t, MitoTypeProperty> &ret_mito_probs, 
+                                            int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob)
 {
     unsigned int maxx = get_xsize() - 1; 
     unsigned int maxy = get_ysize() - 1; 
@@ -337,11 +290,11 @@ void BioStack::build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, s
         RagPtr rag = rag_list[worker_id];
         FeatureMgrPtr feature_man = fm_list[worker_id];
         // unordered_map<Label_t, MitoTypeProperty> mito_probs = mitop_list[worker_id];
+        unordered_set<Label_t> labels;
+        vector<double> predictions(prob_list.size(), 0.0);        
 
         for (int y = y_start; y < y_end; y++) {
             for (int x = x_start; x < x_end; x++) {
-                unordered_set<Label_t> labels;
-                vector<double> predictions(prob_list.size(), 0.0);
                 
                 Label_t label = (*labelvol)(x,y,z); 
                 
@@ -360,20 +313,6 @@ void BioStack::build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, s
                 if (z < maxz) label7 = (*labelvol)(x,y,z+1);
                 
 
-                // set<Label_t> neighbors;
-                // if (x > 0)
-                //     neighbors.insert((*labelvol)(x-1,y,z));
-                // if (x < maxx)
-                //     neighbors.insert((*labelvol)(x+1,y,z));
-                // if (y > 0)
-                //     neighbors.insert((*labelvol)(x,y-1,z)); 
-                // if (y < maxy)
-                //     neighbors.insert((*labelvol)(x,y+1,z));
-                // if (z > 0)
-                //     neighbors.insert((*labelvol)(x,y,z-1));
-                // if (z < maxz)
-                //     neighbors.insert((*labelvol)(x,y,z+1));
-
 
                 for (unsigned int i = 0; i < prob_list.size(); ++i) {
                     predictions[i] = (*(prob_list[i]))(x,y,z);
@@ -388,15 +327,15 @@ void BioStack::build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, s
 
                 node->incr_size();
 
-                // if (neighbors.size() < 6)
-                //     node->incr_boundary_size();
             
                 if (feature_man) {
                     feature_man->add_val(predictions, node);
                 }
 
-                // mito_probs[label].update(predictions); 
-                mitop_list[worker_id][label].update(predictions); 
+                if (use_mito_prob) {
+                    // mito_probs[label].update(predictions); 
+                    mitop_list[worker_id][label].update(predictions); 
+                }
 
 
                 if (label2 && (label != label2)) {
@@ -467,9 +406,19 @@ void BioStack::build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_man, s
             }
         }
     }
+
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
+
     merge_rag_list_recurse(rag_list, fm_list, 0, nworkers-1);
-    merge_mito_prob_list_recurse(mitop_list, 0, nworkers-1);
-    ret_mito_probs = mitop_list[0];
+
+    if (use_mito_prob) {
+        merge_mito_prob_list_recurse(mitop_list, 0, nworkers-1);
+        ret_mito_probs = mitop_list[0];
+    }
+
+    boost::posix_time::ptime end = boost::posix_time::microsec_clock::local_time();
+
+    cout << endl << "---------------------- TIME TO MERGE: " << (end - start).total_milliseconds() << " ms\n";
 }
 
 
@@ -867,18 +816,79 @@ void merge_mito_probs(unordered_map<Label_t, MitoTypeProperty> &prob1, unordered
 
 
 
-void BioStack::build_rag()
-{
-    if (get_prob_list().size()==0){
-        Stack::build_rag();
-        return;
+
+
+void BioStack::build_rag_recurse (RagPtr &rag1, FeatureMgrPtr &fm1, unordered_map<Label_t, MitoTypeProperty> &mito_prob1, 
+                                                    int x_start, int x_end, int y_start, int y_end, int z_start, int z_end, bool use_mito_prob) {
+    int x_size = x_end - x_start;
+    int y_size = y_end - y_start;
+    int z_size = z_end - z_start;
+
+    RagPtr rag2 = RagPtr(new Rag_t());
+    FeatureMgrPtr fm2 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));
+    fm2->set_basic_features(); 
+    unordered_map<Label_t, MitoTypeProperty> mito_prob2;
+
+    bool stop_recurse = false;
+
+    if (x_size >= y_size && x_size >= z_size) {
+        if (x_size > BLOCK_SIZE_LIMIT) {
+            cilk_spawn build_rag_recurse(rag1, fm1, mito_prob1, x_start, x_start + x_size/2, y_start, y_end, z_start, z_end, use_mito_prob);
+            build_rag_recurse(rag2, fm2, mito_prob2, x_start + x_size/2, x_end, y_start, y_end, z_start, z_end, use_mito_prob);
+            cilk_sync;
+        } else {
+            stop_recurse = true;
+        }
+    } else if (y_size >= x_size && y_size >= z_size) {
+        if (y_size > BLOCK_SIZE_LIMIT) {
+            cilk_spawn build_rag_recurse(rag1, fm1, mito_prob1, x_start, x_end, y_start, y_start + y_size/2, z_start, z_end, use_mito_prob);
+            build_rag_recurse(rag2, fm2, mito_prob2, x_start, x_end, y_start + y_size/2, y_end, z_start, z_end, use_mito_prob);
+            cilk_sync;
+        } else {
+            stop_recurse = true;
+        }
+    } else {
+        if (z_size > BLOCK_SIZE_LIMIT) {
+            cilk_spawn build_rag_recurse(rag1, fm1, mito_prob1, x_start, x_end, y_start, y_end, z_start, z_start + z_size/2, use_mito_prob);
+            build_rag_recurse(rag2, fm2, mito_prob2, x_start, x_end, y_start, y_end, z_start + z_size/2, z_end, use_mito_prob);
+            cilk_sync;
+        } else {
+            stop_recurse = true;
+        }
     }
 
-    if (!feature_manager){
-        FeatureMgrPtr feature_manager_(new FeatureMgr(prob_list.size()));
-        set_feature_manager(feature_manager_);
-        feature_manager->set_basic_features(); 
+    if (stop_recurse) {
+        build_rag_loop(rag1, fm1, mito_prob1, x_start, x_end, y_start, y_end, z_start, z_end, use_mito_prob);
+    } else {
+        merge_rags(rag1, rag2, fm1, fm2);
+        if (use_mito_prob)
+            merge_mito_probs (mito_prob1, mito_prob2);
     }
+}
+
+
+
+
+
+
+
+
+
+void BioStack::build_rag(bool use_mito_prob)
+{
+    if (use_mito_prob) {
+        if (get_prob_list().size()==0){
+            Stack::build_rag();
+            return;
+        }
+
+        if (!feature_manager){
+            FeatureMgrPtr feature_manager_(new FeatureMgr(prob_list.size()));
+            set_feature_manager(feature_manager_);
+            feature_manager->set_basic_features(); 
+        }
+    }
+
     
     //printf("Building bioStack rag\n");
     if (!labelvol) {
@@ -886,9 +896,6 @@ void BioStack::build_rag()
     }
 
     rag = RagPtr(new Rag_t);
-
-    vector<double> predictions(prob_list.size(), 0.0);
-    unordered_set<Label_t> labels;
    
     unsigned int maxx = get_xsize() - 1; 
     unsigned int maxy = get_ysize() - 1; 
@@ -918,11 +925,6 @@ void BioStack::build_rag()
 
     int x_half = x_full/2;
 
-    // cilk_spawn build_rag_loop(mito_probs, 0, x_full, 0, y_full, 0, z_fourth);
-    // cilk_spawn build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_fourth, z_half);
-    // cilk_spawn build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_half, z_half + z_fourth);
-    // build_rag_loop(mito_probs, 0, x_full, 0, y_full, z_half + z_fourth, z_full);
-
     int nworkers = 8;
 
     FeatureMgrPtr fm_list [nworkers];
@@ -939,47 +941,7 @@ void BioStack::build_rag()
     }
 
 
-    // FeatureMgrPtr feature_manager2 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager2->set_basic_features();
-    // FeatureMgrPtr feature_manager3 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager3->set_basic_features();
-    // FeatureMgrPtr feature_manager4 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager4->set_basic_features();
-    // FeatureMgrPtr feature_manager5 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager5->set_basic_features();
-    // FeatureMgrPtr feature_manager6 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager6->set_basic_features();
-    // FeatureMgrPtr feature_manager7 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager7->set_basic_features();
-    // FeatureMgrPtr feature_manager8 = FeatureMgrPtr(new FeatureMgr(prob_list.size()));    
-    // feature_manager8->set_basic_features();
-
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs2;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs3;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs4;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs5;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs6;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs7;
-    // unordered_map<Label_t, MitoTypeProperty> mito_probs8;
-
-    // RagPtr rag2 = RagPtr(new Rag_t());
-    // RagPtr rag3 = RagPtr(new Rag_t());
-    // RagPtr rag4 = RagPtr(new Rag_t());
-    // RagPtr rag5 = RagPtr(new Rag_t());
-    // RagPtr rag6 = RagPtr(new Rag_t());
-    // RagPtr rag7 = RagPtr(new Rag_t());
-    // RagPtr rag8 = RagPtr(new Rag_t());
-
-    // build_rag_loop(rag2, feature_manager2, mito_probs, 0, x_full, 0, y_full, 0, z_half);
-    // build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, z_half, z_full);
-    
-
-    // cilk_spawn build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_half, 0, z_half);
-    // cilk_spawn build_rag_loop(rag2, feature_manager2, mito_probs2, 0, x_full, y_half, y_full, 0, z_half);
-    // cilk_spawn build_rag_loop(rag3, feature_manager3, mito_probs3, 0, x_full, 0, y_half, z_half, z_full);
-    // build_rag_loop(rag4, feature_manager4, mito_probs4, 0, x_full, y_half, y_full, z_half, z_full);
-
-    // =================================== PARALLEL ================================================
+    // =================================== HARDCODE ================================================
 
     // // cilk_spawn build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_half, 0, z_fourth);
     // // cilk_spawn build_rag_loop(rag2, feature_manager2, mito_probs2, 0, x_full, y_half, y_full, 0, z_fourth);
@@ -1035,80 +997,20 @@ void BioStack::build_rag()
     // cout << endl << "---------------------- TIME TO MERGE: " << (end - start).total_milliseconds() << " ms\n";
 
 
-    // =================================== SERIAL ================================================
-    build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, 0, z_full);
+    // =================================== SYSTEMATIC ================================================
+    // cilk_build_rag_loop(rag, feature_manager, mito_probs, 0, x_full, 0, y_full, 0, z_full, use_mito_prob);
+    build_rag_recurse (rag, feature_manager, mito_probs, 0, x_full, 0, y_full, 0, z_full, use_mito_prob);
 
-
-    /*
-    volume_forXYZ(*labelvol, x, y, z) {
-        Label_t label = (*labelvol)(x,y,z); 
-        
-        if (!label) {
-            continue;
+    if (use_mito_prob) {
+        Label_t largest_id = 0;
+        for (Rag_t::nodes_iterator iter = rag->nodes_begin(); iter != rag->nodes_end(); ++iter) {
+            Label_t id = (*iter)->get_node_id();
+            largest_id = (id>largest_id)? id : largest_id;
+    	
+            MitoTypeProperty mtype = mito_probs[id];
+            mtype.set_type(); 
+            (*iter)->set_property("mito-type", mtype);
         }
-
-        RagNode_t * node = rag->find_rag_node(label);
-
-        if (!node) {
-            node =  rag->insert_rag_node(label); 
-        }
-        node->incr_size();
-                
-        for (unsigned int i = 0; i < prob_list.size(); ++i) {
-            predictions[i] = (*(prob_list[i]))(x,y,z);
-        }
-        if (feature_manager) {
-            feature_manager->add_val(predictions, node);
-        }
-        mito_probs[label].update(predictions); 
-
-        Label_t label2 = 0, label3 = 0, label4 = 0, label5 = 0, label6 = 0, label7 = 0;
-        if (x > 0) label2 = (*labelvol)(x-1,y,z);
-        if (x < maxx) label3 = (*labelvol)(x+1,y,z);
-        if (y > 0) label4 = (*labelvol)(x,y-1,z);
-        if (y < maxy) label5 = (*labelvol)(x,y+1,z);
-        if (z > 0) label6 = (*labelvol)(x,y,z-1);
-        if (z < maxz) label7 = (*labelvol)(x,y,z+1);
-
-        if (label2 && (label != label2)) {
-            rag_add_edge(label, label2, predictions);
-            labels.insert(label2);
-        }
-        if (label3 && (label != label3) && (labels.find(label3) == labels.end())) {
-            rag_add_edge(label, label3, predictions);
-            labels.insert(label3);
-        }
-        if (label4 && (label != label4) && (labels.find(label4) == labels.end())) {
-            rag_add_edge(label, label4, predictions);
-            labels.insert(label4);
-        }
-        if (label5 && (label != label5) && (labels.find(label5) == labels.end())) {
-            rag_add_edge(label, label5, predictions);
-            labels.insert(label5);
-        }
-        if (label6 && (label != label6) && (labels.find(label6) == labels.end())) {
-            rag_add_edge(label, label6, predictions);
-            labels.insert(label6);
-        }
-        if (label7 && (label != label7) && (labels.find(label7) == labels.end())) {
-            rag_add_edge(label, label7, predictions);
-        }
-
-        if (!label2 || !label3 || !label4 || !label5 || !label6 || !label7) {
-            node->incr_boundary_size();
-        }
-        labels.clear();
-    }
-    */
-    
-    Label_t largest_id = 0;
-    for (Rag_t::nodes_iterator iter = rag->nodes_begin(); iter != rag->nodes_end(); ++iter) {
-        Label_t id = (*iter)->get_node_id();
-        largest_id = (id>largest_id)? id : largest_id;
-	
-        MitoTypeProperty mtype = mito_probs[id];
-        mtype.set_type(); 
-        (*iter)->set_property("mito-type", mtype);
     }
     //printf("Done Biostack rag, largest: %u\n", largest_id);
 }
