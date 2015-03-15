@@ -418,7 +418,7 @@ void BioStack::cilk_build_rag_loop(RagPtr &ret_rag, FeatureMgrPtr &ret_feature_m
 
     boost::posix_time::ptime end = boost::posix_time::microsec_clock::local_time();
 
-    cout << endl << "---------------------- TIME TO MERGE: " << (end - start).total_milliseconds() << " ms\n";
+    cout << endl << "------------------------ TIME TO MERGE: " << (end - start).total_milliseconds() << " ms\n";
 }
 
 

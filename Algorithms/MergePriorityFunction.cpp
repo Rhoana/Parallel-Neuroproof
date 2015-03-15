@@ -1,6 +1,7 @@
 #include "MergePriorityFunction.h"
 #include "../BioPriors/MitoTypeProperty.h"
 #include <boost/thread/mutex.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #include <cilk/cilk.h>
 #include <cilk/cilk_api.h>
@@ -97,12 +98,16 @@ void ProbPriority::initialize_priority(double threshold_, bool use_edge_weight)
     }
 
     /// merge and sort the indices
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
     vector<int> indices_to_insert;
     for (int i = 0; i < nworkers; i++) {
     	indices_to_insert.insert(indices_to_insert.end(), indices_lists[i].begin(), indices_lists[i].end());
     }
 
     std::sort(indices_to_insert.begin(), indices_to_insert.end());
+
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ MERGE AND SORT IN PRIORITY Q: " << (now - start).total_milliseconds() << " ms\n";
 
     for (vector<int>::iterator it = indices_to_insert.begin(); it != indices_to_insert.end(); ++it) {
     	ranking.insert(tmp_array[*it]);

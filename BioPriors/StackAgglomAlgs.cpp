@@ -5,6 +5,11 @@
 #include "../Algorithms/FeatureJoinAlgs.h"
 #include <boost/date_time/posix_time/posix_time.hpp>
 
+#include <cilk/cilk.h>
+#include <cilk/cilk_api.h>
+
+#include <algorithm>
+
 #include <vector>
 
 using std::vector;
@@ -124,7 +129,7 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     }
 
     boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
-    agglomerate_stack(stack, 0.06, use_mito); //0.01 for 250, 0.02 for 500
+    agglomerate_stack_parallel(stack, 0.06, use_mito); //0.01 for 250, 0.02 for 500
     boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO FIRST PASS: " << (now - start).total_milliseconds() << " ms\n";
     stack.remove_inclusions();	  	
@@ -135,6 +140,38 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
 
     unsigned int edgeCount=0;	
 
+    start = boost::posix_time::microsec_clock::local_time();
+    int num_edges = (int)rag->get_num_edges();
+    vector<Rag_t::edges_iterator> iter_vec;
+
+    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
+        iter_vec.push_back(iter);
+    }
+
+
+    cilk_for (int i = 0; i < num_edges; i++) {
+        Rag_t::edges_iterator iter = iter_vec[i];
+        if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
+            double prev_val = (*iter)->get_weight();    
+            double val = feature_mgr->get_prob(*iter);
+            (*iter)->set_weight(val);
+
+            // (*iter)->set_property("qloc", edgeCount);
+
+            // Node_t node1 = (*iter)->get_node1()->get_node_id();  
+            // Node_t node2 = (*iter)->get_node2()->get_node_id();  
+        }
+    }
+
+    int i = 0;
+    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
+        if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
+            (*iter)->set_property("qloc", i);
+            i++;
+        }
+    }
+
+    /*
     for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
         if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
     	    double prev_val = (*iter)->get_weight();	
@@ -149,9 +186,12 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     	    edgeCount++;
     	}
     }
+    */
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO MID LOOP: " << (now - start).total_milliseconds() << " ms\n";
 
     start = boost::posix_time::microsec_clock::local_time();
-    agglomerate_stack(stack, threshold, use_mito, true);
+    agglomerate_stack_parallel(stack, threshold, use_mito, true);
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
 }
