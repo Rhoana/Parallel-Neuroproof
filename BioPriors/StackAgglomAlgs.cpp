@@ -3,6 +3,7 @@
 #include "../Stack/Stack.h"
 #include "MitoTypeProperty.h"
 #include "../Algorithms/FeatureJoinAlgs.h"
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #include <vector>
 
@@ -37,7 +38,10 @@ void agglomerate_stack(Stack& stack, double threshold,
     FeatureMgrPtr feature_mgr = stack.get_feature_manager();
 
     MergePriority* priority = new ProbPriority(feature_mgr.get(), rag.get(), synapse_mode);
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
     priority->initialize_priority(threshold, use_edge_weight);
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ INIT PRIORITY Q: " << (now - start).total_milliseconds() << " ms\n";
     DelayedPriorityCombine node_combine_alg(feature_mgr.get(), rag.get(), priority); 
     
     while (!(priority->empty())) {
@@ -66,13 +70,63 @@ void agglomerate_stack(Stack& stack, double threshold,
     delete priority;
 }
 
+
+
+void agglomerate_stack_parallel(Stack& stack, double threshold, bool use_mito, bool use_edge_weight, bool synapse_mode) {
+    // agglomerate_stack(stack, threshold, use_mito, use_edge_weight, synapse_mode);
+
+    if (threshold == 0.0) {
+        return;
+    }
+
+    RagPtr rag = stack.get_rag();
+    FeatureMgrPtr feature_mgr = stack.get_feature_manager();
+
+
+    MergePriority* priority = new ProbPriority(feature_mgr.get(), rag.get(), synapse_mode);
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
+    priority->initialize_priority(threshold, use_edge_weight);
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ INIT PRIORITY Q: " << (now - start).total_milliseconds() << " ms\n";
+    DelayedPriorityCombine node_combine_alg(feature_mgr.get(), rag.get(), priority);
+
+    while (!(priority->empty())) {
+        RagEdge_t* rag_edge = priority->get_top_edge();
+
+        if (!rag_edge) {
+            continue;
+        }
+
+        RagNode_t* rag_node1 = rag_edge->get_node1();
+        RagNode_t* rag_node2 = rag_edge->get_node2();
+
+        if (use_mito) {
+            if (is_mito(rag_node1) || is_mito(rag_node2)) {
+                continue;
+            }
+        }
+
+        Node_t node1 = rag_node1->get_node_id(); 
+        Node_t node2 = rag_node2->get_node_id();
+        
+        // retain node1 
+        stack.merge_labels(node2, node1, &node_combine_alg);
+    }
+
+    delete priority;    
+}
+
+
 void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
 {
     if (threshold == 0.0) {
         return;
     }
 
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
     agglomerate_stack(stack, 0.06, use_mito); //0.01 for 250, 0.02 for 500
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO FIRST PASS: " << (now - start).total_milliseconds() << " ms\n";
     stack.remove_inclusions();	  	
     cout <<  "Remaining regions: " << stack.get_num_labels();	
 
@@ -83,20 +137,23 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
 
     for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
         if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
-	    double prev_val = (*iter)->get_weight();	
-            double val = feature_mgr->get_prob(*iter);
-            (*iter)->set_weight(val);
+    	    double prev_val = (*iter)->get_weight();	
+                double val = feature_mgr->get_prob(*iter);
+                (*iter)->set_weight(val);
 
-            (*iter)->set_property("qloc", edgeCount);
+                (*iter)->set_property("qloc", edgeCount);
 
-	    // Node_t node1 = (*iter)->get_node1()->get_node_id();	
-	    // Node_t node2 = (*iter)->get_node2()->get_node_id();	
+    	    // Node_t node1 = (*iter)->get_node1()->get_node_id();	
+    	    // Node_t node2 = (*iter)->get_node2()->get_node_id();	
 
-	    edgeCount++;
-	}
+    	    edgeCount++;
+    	}
     }
 
+    start = boost::posix_time::microsec_clock::local_time();
     agglomerate_stack(stack, threshold, use_mito, true);
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
 }
 
 void agglomerate_stack_queue(Stack& stack, double threshold, 

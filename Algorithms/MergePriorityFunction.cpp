@@ -1,5 +1,11 @@
 #include "MergePriorityFunction.h"
 #include "../BioPriors/MitoTypeProperty.h"
+#include <boost/thread/mutex.hpp>
+
+#include <cilk/cilk.h>
+#include <cilk/cilk_api.h>
+
+#include <algorithm>
 
 #include <cstdio>
 
@@ -52,22 +58,54 @@ double mito_boundary_ratio(RagEdge_t* edge)
 
 
 
+
 void ProbPriority::initialize_priority(double threshold_, bool use_edge_weight)
 {
     threshold = threshold_;
-    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
-	if (valid_edge(*iter)) {
-	    double val;
-	    if (use_edge_weight)
-		val = (*iter)->get_weight();
-	    else
-		val = feature_mgr->get_prob(*iter);
-	    (*iter)->set_weight(val);
+    int num_edges = (int)rag->get_num_edges();
+    vector<Rag_t::edges_iterator> iter_vec;
+    pair<double, std::pair<Node_t, Node_t> > tmp_array [num_edges];
 
-	    if (val <= threshold) {
-		ranking.insert(std::make_pair(val, std::make_pair((*iter)->get_node1()->get_node_id(), (*iter)->get_node2()->get_node_id())));
-	    }
-	}
+    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
+    	iter_vec.push_back(iter);
+    }
+
+    // cilk::reducer< cilk::op_list_append<char> > letters_reducer;
+    int nworkers = __cilkrts_get_nworkers(); // CILK_NWORKERS
+    vector<int> indices_lists [nworkers];
+
+    cilk_for (int i = 0; i < num_edges; i++) {
+    	Rag_t::edges_iterator iter = iter_vec[i];
+    	
+    // for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
+		if (valid_edge(*iter)) {
+		    double val;
+		    if (use_edge_weight)
+				val = (*iter)->get_weight();
+		    else
+				val = feature_mgr->get_prob(*iter);
+		    
+		    (*iter)->set_weight(val);
+
+		    if (val <= threshold) {
+				// ranking.insert(std::make_pair(val, std::make_pair((*iter)->get_node1()->get_node_id(), (*iter)->get_node2()->get_node_id())));
+				int worker_id = __cilkrts_get_worker_number();
+		    	indices_lists[worker_id].push_back(i);
+		    	tmp_array[i] = std::make_pair(val, std::make_pair((*iter)->get_node1()->get_node_id(), (*iter)->get_node2()->get_node_id()));
+		    }
+		}
+    }
+
+    /// merge and sort the indices
+    vector<int> indices_to_insert;
+    for (int i = 0; i < nworkers; i++) {
+    	indices_to_insert.insert(indices_to_insert.end(), indices_lists[i].begin(), indices_lists[i].end());
+    }
+
+    std::sort(indices_to_insert.begin(), indices_to_insert.end());
+
+    for (vector<int>::iterator it = indices_to_insert.begin(); it != indices_to_insert.end(); ++it) {
+    	ranking.insert(tmp_array[*it]);
     }
 }
 

@@ -36,7 +36,7 @@ struct PredictOptions
 {
     PredictOptions(int argc, char** argv) : synapse_filename(""), output_filename("segmentation.h5"),
         graph_filename("graph.json"), threshold(0.2), watershed_threshold(0), post_synapse_threshold(0.0),
-        merge_mito(true), agglo_type(1), enable_transforms(true), postseg_classifier_filename(""),
+        merge_mito(false), agglo_type(1), enable_transforms(true), postseg_classifier_filename(""),
         location_prob(true)
     {
         OptionParser parser("Program that predicts edge confidence for a graph and merges confident edges");
@@ -179,6 +179,10 @@ void run_prediction(PredictOptions& options)
         case 4:
             cout<<"Agglomerating (flat) upto threshold "<< options.threshold<< " ..."; 
             agglomerate_stack_flat(stack, options.threshold, options.merge_mito);
+            break;
+        case 5:
+            cout <<"Agglomerating (parallel) upto threshold "<< options.threshold << " ...";
+            agglomerate_stack_parallel(stack, options.threshold, options.merge_mito);
             break;
         default: throw ErrMsg("Illegal agglomeration type specified");
     }
