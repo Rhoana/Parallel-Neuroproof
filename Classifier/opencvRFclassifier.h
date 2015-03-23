@@ -46,7 +46,7 @@ public:
      void set_ignore_featlist(std::vector<unsigned int>& pignore_list){ignore_featlist = pignore_list;};
      void get_ignore_featlist(std::vector<unsigned int>& pignore_list){pignore_list = ignore_featlist;};
      
-     
+     OpencvRFclassifier* clone() const {return new OpencvRFclassifier(*this); }
      bool is_trained(){
 	if (_rf && _rf->get_tree_count()>0)
 	   return true;

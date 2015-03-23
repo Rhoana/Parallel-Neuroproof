@@ -37,7 +37,7 @@ struct PredictOptions
     PredictOptions(int argc, char** argv) : synapse_filename(""), output_filename("segmentation.h5"),
         graph_filename("graph.json"), threshold(0.2), watershed_threshold(0), post_synapse_threshold(0.0),
         merge_mito(false), agglo_type(1), enable_transforms(true), postseg_classifier_filename(""),
-        location_prob(true)
+        location_prob(true), num_top_edges(1)
     {
         OptionParser parser("Program that predicts edge confidence for a graph and merges confident edges");
 
@@ -66,6 +66,8 @@ struct PredictOptions
                 "Merge synapses indepedent of constraints"); 
 
         // invisible arguments
+        parser.add_option(num_top_edges, "num-top-edges",
+                "number of top edges to look at from priority queue", true, false, true); 
         parser.add_option(merge_mito, "merge-mito",
                 "perform separate mitochondrion merge phase", true, false, true); 
         parser.add_option(agglo_type, "agglo-type",
@@ -98,13 +100,14 @@ struct PredictOptions
     int agglo_type;
     bool enable_transforms;
     bool location_prob;
+    int num_top_edges;
 };
 
 
 void run_prediction(PredictOptions& options)
 {
     boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
-
+    boost::posix_time::ptime start_all = boost::posix_time::microsec_clock::local_time();
     // create prediction array
     vector<VolumeProbPtr> prob_list = VolumeProb::create_volume_array(
         options.prediction_filename.c_str(), PRED_DATASET_NAME);
@@ -124,12 +127,16 @@ void run_prediction(PredictOptions& options)
     FeatureMgrPtr feature_manager(new FeatureMgr(prob_list.size()));
     feature_manager->set_basic_features(); 
 
+    start = boost::posix_time::microsec_clock::local_time();
     EdgeClassifier* eclfr;
     if (ends_with(options.classifier_filename, ".h5"))
-    	eclfr = new VigraRFclassifier(options.classifier_filename.c_str());	
-    else if (ends_with(options.classifier_filename, ".xml")) 	
-	eclfr = new OpencvRFclassifier(options.classifier_filename.c_str());	
+        eclfr = new VigraRFclassifier(options.classifier_filename.c_str());	
+    else if (ends_with(options.classifier_filename, ".xml")) 
+        eclfr = new OpencvRFclassifier(options.classifier_filename.c_str());	
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "---------------------- INIT CLASSIFIER: " << (now - start).total_milliseconds() << " ms\n";
 
+    EdgeClassifier* back_up = eclfr->clone();
     feature_manager->set_classifier(eclfr);   	 
 
     // create stack to hold segmentation state
@@ -152,9 +159,8 @@ void run_prediction(PredictOptions& options)
     }
     
     // stack.print_fm();
-
+    
     remove_inclusions(stack);
-
     // stack.print_rag();
     // stack.print_fm();
     
@@ -182,7 +188,7 @@ void run_prediction(PredictOptions& options)
             break;
         case 5:
             cout <<"Agglomerating (parallel) upto threshold "<< options.threshold << " ...";
-            agglomerate_stack_parallel(stack, options.threshold, options.merge_mito);
+            agglomerate_stack_parallel(stack, options.num_top_edges, options.threshold, options.merge_mito);
             break;
         default: throw ErrMsg("Illegal agglomeration type specified");
     }
@@ -191,6 +197,7 @@ void run_prediction(PredictOptions& options)
 
     cout << "Done with "<< stack.get_num_labels()<< " regions\n";
    
+    
     if (options.post_synapse_threshold > 0.00001) {
         cout << "Agglomerating (agglo) ignoring synapse constraints upto threshold "
             << options.post_synapse_threshold << endl;
@@ -205,8 +212,8 @@ void run_prediction(PredictOptions& options)
     remove_inclusions(stack);
 
 
-    if (options.merge_mito){
-	cout<<"Merge Mitochondria (border-len) ..."; 
+    if (options.merge_mito) {
+        cout<<"Merge Mitochondria (border-len) ..."; 
         agglomerate_stack_mito(stack);
     	cout<<"done with "<< stack.get_num_labels() << " regions\n";	
 
@@ -225,16 +232,24 @@ void run_prediction(PredictOptions& options)
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO REMOVE INCLUSION AND SMALL BODIES: " << (now - start).total_milliseconds() << " ms\n";
 
+
+    start = boost::posix_time::microsec_clock::local_time();
+    
     if (options.postseg_classifier_filename == "") {
         options.postseg_classifier_filename = options.classifier_filename;
+        eclfr = back_up;
+    } else {
+        delete eclfr;
+        if (ends_with(options.postseg_classifier_filename, ".h5"))
+            eclfr = new VigraRFclassifier(options.postseg_classifier_filename.c_str()); 
+        else if (ends_with(options.postseg_classifier_filename, ".xml"))    
+            eclfr = new OpencvRFclassifier(options.postseg_classifier_filename.c_str());            
     }
 
-    delete eclfr;
-    if (ends_with(options.postseg_classifier_filename, ".h5"))
-    	eclfr = new VigraRFclassifier(options.postseg_classifier_filename.c_str());	
-    else if (ends_with(options.postseg_classifier_filename, ".xml")) 	
-	eclfr = new OpencvRFclassifier(options.postseg_classifier_filename.c_str());	
-    
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "---------------------- TIME TO INIT CLASSIFIER (2nd): " << (now - start).total_milliseconds() << " ms\n";
+
+
     feature_manager->clear_features();
     feature_manager->set_classifier(eclfr);   	
     start = boost::posix_time::microsec_clock::local_time(); 
@@ -255,6 +270,8 @@ void run_prediction(PredictOptions& options)
     cout << endl << "---------------------- TIME TO SERIALIZE: " << (now - start).total_milliseconds() << " ms\n";
 
     delete eclfr;
+    boost::posix_time::ptime end_all = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ TIME TOTAL: " << (end_all - start_all).total_milliseconds() << " ms\n";
 }
 
 void testing_func () {

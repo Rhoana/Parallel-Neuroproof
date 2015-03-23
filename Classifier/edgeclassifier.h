@@ -6,6 +6,7 @@ class EdgeClassifier{
 
 
 public: 
+	virtual EdgeClassifier* clone() const = 0;
 	virtual void load_classifier(const char*)=0;
 	virtual double predict(std::vector<double>&){
 

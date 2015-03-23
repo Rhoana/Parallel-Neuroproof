@@ -38,7 +38,7 @@ public:
 
      void set_ignore_featlist(std::vector<unsigned int>& pignore_list){ignore_featlist = pignore_list;};
      void get_ignore_featlist(std::vector<unsigned int>& pignore_list){pignore_list = ignore_featlist;};
-     
+     VigraRFclassifier* clone() const {return new VigraRFclassifier(*this); }
      
      bool is_trained(){
 	if (_rf && _rf->tree_count()>0)

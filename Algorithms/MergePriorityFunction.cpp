@@ -1,10 +1,13 @@
 #include "MergePriorityFunction.h"
 #include "../BioPriors/MitoTypeProperty.h"
+
 #include <boost/thread/mutex.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
 #include <cilk/cilk.h>
 #include <cilk/cilk_api.h>
+
+#include <pthread.h>
 
 #include <algorithm>
 
@@ -98,16 +101,12 @@ void ProbPriority::initialize_priority(double threshold_, bool use_edge_weight)
     }
 
     /// merge and sort the indices
-    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
     vector<int> indices_to_insert;
     for (int i = 0; i < nworkers; i++) {
     	indices_to_insert.insert(indices_to_insert.end(), indices_lists[i].begin(), indices_lists[i].end());
     }
 
     std::sort(indices_to_insert.begin(), indices_to_insert.end());
-
-    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
-    cout << endl << "------------------------ MERGE AND SORT IN PRIORITY Q: " << (now - start).total_milliseconds() << " ms\n";
 
     for (vector<int>::iterator it = indices_to_insert.begin(); it != indices_to_insert.end(); ++it) {
     	ranking.insert(tmp_array[*it]);
@@ -182,6 +181,258 @@ bool ProbPriority::empty()
     return ranking.empty();
 }
 
+boost::mutex mu;
+boost::mutex mu1;
+boost::mutex mu2;
+RagEdge_t* ProbPriority::get_edge_with_iter(EdgeRank_t::iterator iter)
+{
+    if (ranking.empty())
+        return 0;
+
+    mu1.lock();
+    if (ranking.empty()) {
+        mu1.unlock();
+        return 0;
+    }
+
+    double curr_threshold = (*iter).first;
+    Node_t node1 = (*iter).second.first;
+    Node_t node2 = (*iter).second.second;
+
+    // cout << curr_threshold << " " << node1 << " " << node2 << std::endl;
+
+    if (iter == ranking.begin() && curr_threshold > threshold) {
+        ranking.clear();
+        mu1.unlock();
+        return 0;
+    }
+
+    ranking.erase(iter);
+    mu1.unlock();
+
+    RagNode_t* rag_node1 = rag->find_rag_node(node1); 
+    RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+
+    if (!(rag_node1 && rag_node2)) {
+        return 0;
+    }
+    RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+
+    if (!rag_edge) {
+        return 0;
+    }
+
+    if (!valid_edge(rag_edge)) {
+        return 0;
+    }
+
+    double val = rag_edge->get_weight();
+    
+    bool dirty = false;
+    if (rag_edge->is_dirty()) {
+        dirty = true;
+        val = feature_mgr->get_prob(rag_edge);
+        rag_edge->set_weight(val);
+        rag_edge->set_dirty(false);
+        mu2.lock();
+        dirty_edges.erase(OrderedPair(node1, node2));
+        mu2.unlock();
+    }
+    
+    if (val > (curr_threshold + Epsilon)) {
+        mu1.lock();
+        if (dirty && (val <= threshold)) {
+            ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+        }
+        else{ 
+            //printf("edge prob changed from %.4f to %.4f\n",curr_threshold, val);
+            kicked_out++;   
+            if (kicked_fid)
+              fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+            node1, node2, rag_node1->get_size(), rag_node2->get_size());
+            //fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", rag_edge->get_weight(),node1, node2, rag_node1->get_size(), rag_node2->get_size());
+            
+            //add_dirty_edge(rag_edge);
+        }
+        mu1.unlock();
+        return 0;
+    }
+    return rag_edge; 
+}
+
+
+
+
+inline void prior_update(int array [], int loc, int prior) {
+    int old_val;
+    do {
+        old_val = array[loc];
+        if (old_val < prior) 
+            return;
+    } while (!__sync_bool_compare_and_swap(&(array[loc]), old_val, prior));
+}
+
+
+
+void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_remove_from_queue, vector<RagEdge_t*> &edges_to_process) {
+    // cilk_for (int i = 0; i < edges_to_remove_from_queue.size(); i++) {
+    //     // mu.lock();
+    //     RagEdge_t* rag_edge = get_edge_with_iter(edges_to_remove_from_queue[i]);
+    //     // maybe move this to earlier?
+    //     if (rag_edge) {
+    //         mu.lock();
+    //         edges_to_process.push_back(rag_edge);
+    //         mu.unlock();
+    //     }
+    //     // mu.unlock();
+    // }
+
+    // loop to remove edges 
+    vector<pair<Node_t, Node_t> > node_pairs_vector;
+    vector<double> curr_threshold_vector;
+
+    for (vector<EdgeRank_t::iterator>::iterator it = edges_to_remove_from_queue.begin(); it != edges_to_remove_from_queue.end(); ++it) {
+        EdgeRank_t::iterator iter = *it;
+
+        if (ranking.empty())
+            break;
+
+        double curr_threshold = (*iter).first;
+        Node_t node1 = (*iter).second.first;
+        Node_t node2 = (*iter).second.second;
+
+        if (iter == ranking.begin() && curr_threshold > threshold) {
+            ranking.clear();
+            break;
+        }
+
+        ranking.erase(iter);
+        node_pairs_vector.push_back(make_pair(node1, node2));
+        curr_threshold_vector.push_back(curr_threshold);
+    }
+
+    // parallel loop to process these node pairs
+    int nworkers = __cilkrts_get_nworkers(); // CILK_NWORKERS
+    vector<RagEdge_t*> edges_to_process_list [nworkers];
+    EdgeRank_t ranking_list [nworkers];
+    vector<pair<Node_t, Node_t> > dirty_list [nworkers];
+
+    cilk_for (int i = 0; i < node_pairs_vector.size(); ++i) {
+        int worker_id = __cilkrts_get_worker_number();
+        double curr_threshold = curr_threshold_vector[i];
+        Node_t node1 = node_pairs_vector[i].first;
+        Node_t node2 = node_pairs_vector[i].second;
+        RagNode_t* rag_node1 = rag->find_rag_node(node1); 
+        RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+        
+        if (!(rag_node1 && rag_node2)) {
+            continue;
+        }
+
+        RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+
+        if (!rag_edge) {
+            continue;
+        }
+
+        if (!valid_edge(rag_edge)) {
+            continue;
+        }
+
+        double val = rag_edge->get_weight();
+    
+        bool dirty = false;
+        if (rag_edge->is_dirty()) {
+            dirty = true;
+            val = feature_mgr->get_prob(rag_edge);
+            rag_edge->set_weight(val);
+            rag_edge->set_dirty(false);
+            dirty_list[worker_id].push_back(make_pair(node1, node2));
+        }
+
+        if (val > (curr_threshold + Epsilon)) {
+            if (dirty && (val <= threshold)) {
+                ranking_list[worker_id].insert(std::make_pair(val, std::make_pair(node1, node2)));
+            }
+            else{ 
+                //printf("edge prob changed from %.4f to %.4f\n",curr_threshold, val);
+                // kicked_out++;   
+                 __sync_fetch_and_add( &kicked_out, 1);
+                if (kicked_fid)
+                  fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+                node1, node2, rag_node1->get_size(), rag_node2->get_size());
+                //fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", rag_edge->get_weight(),node1, node2, rag_node1->get_size(), rag_node2->get_size());
+                
+                //add_dirty_edge(rag_edge);
+            }
+            continue;
+        }
+
+        mu.lock();
+        edges_to_process.push_back(rag_edge);
+        mu.unlock();
+    }
+    
+    for (int i = 0; i < nworkers; ++i) {
+        for (EdgeRank_t::iterator it = ranking_list[i].begin(); it != ranking_list[i].end(); ++it) {
+            ranking.insert(*it);
+        }
+        for (vector<pair<Node_t, Node_t> >::iterator it = dirty_list[i].begin(); it != dirty_list[i].end(); ++it) {
+            dirty_edges.erase(OrderedPair(it->first, it->second));
+        }
+        // for (vector<RagEdge_t*>::iterator it = edges_to_process_list[i].begin(); it != edges_to_process_list[i].end(); ++it) {
+        //     edges_to_process.push_back(*it);
+        // }
+        // edges_to_process_list[i].clear();
+    }
+}
+
+
+
+vector<RagEdge_t*> ProbPriority::get_top_independent_edges (int nbd_size) {
+    vector<EdgeRank_t::iterator> top_edges;
+    int num_edges_looked_at = 0;
+    for (EdgeRank_t::iterator it = ranking.begin(); it != ranking.end() && num_edges_looked_at < nbd_size; ++it, ++num_edges_looked_at) {
+        top_edges.push_back(it);
+    }
+
+    // do priority updates to see which edges can be processed
+    int max_labels = 100000;
+    int node_priority_update_array [max_labels];
+
+    for (int i = 0; i < max_labels; ++i) {
+        node_priority_update_array[i] = nbd_size + 1;
+    }
+
+    cilk_for (int i = 0; i < top_edges.size(); ++i) {
+        Node_t node1 = (*top_edges[i]).second.first;
+        Node_t node2 = (*top_edges[i]).second.second;
+
+        prior_update(node_priority_update_array, (int)node1, i);
+        prior_update(node_priority_update_array, (int)node2, i);
+    }
+
+    // check which edge can be processed
+    vector<RagEdge_t*> edges_to_process;
+    // cout << "NUM TOP EDGES: " << top_edges.size() << endl;
+
+    vector<EdgeRank_t::iterator> edges_to_remove_from_queue;
+    for (int i = 0; i < top_edges.size(); ++i) {
+        Node_t node1 = (*top_edges[i]).second.first;
+        Node_t node2 = (*top_edges[i]).second.second;
+        if (node_priority_update_array[(int)node1] == node_priority_update_array[(int)node2]) {
+            edges_to_remove_from_queue.push_back(top_edges[i]);
+        }
+    }
+
+    get_edges_parallel(edges_to_remove_from_queue, edges_to_process);
+
+    return edges_to_process;
+}
+
+
+
+
 
 RagEdge_t* ProbPriority::get_top_edge()
 {
@@ -191,55 +442,56 @@ RagEdge_t* ProbPriority::get_top_edge()
     Node_t node2 = (*first_entry).second.second;
     ranking.erase(first_entry);
 
-    //cout << curr_threshold << " " << node1 << " " << node2 << std::endl;
+    // cout << curr_threshold << " " << node1 << " " << node2 << std::endl;
 
     if (curr_threshold > threshold) {
-	ranking.clear();
-	return 0;
+		ranking.clear();
+		return 0;
     }
+
 
     RagNode_t* rag_node1 = rag->find_rag_node(node1); 
     RagNode_t* rag_node2 = rag->find_rag_node(node2); 
 
     if (!(rag_node1 && rag_node2)) {
-	return 0;
+		return 0;
     }
     RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
 
     if (!rag_edge) {
-	return 0;
+		return 0;
     }
 
     if (!valid_edge(rag_edge)) {
-	return 0;
+		return 0;
     }
 
     double val = rag_edge->get_weight();
-
+    
     bool dirty = false;
     if (rag_edge->is_dirty()) {
-	dirty = true;
-	val = feature_mgr->get_prob(rag_edge);
-	rag_edge->set_weight(val);
-	rag_edge->set_dirty(false);
-	dirty_edges.erase(OrderedPair(node1, node2));
+		dirty = true;
+		val = feature_mgr->get_prob(rag_edge);
+		rag_edge->set_weight(val);
+		rag_edge->set_dirty(false);
+		dirty_edges.erase(OrderedPair(node1, node2));
     }
-
+    
     if (val > (curr_threshold + Epsilon)) {
-	if (dirty && (val <= threshold)) {
-	    ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
-	}
-	else{ 
-	    //printf("edge prob changed from %.4f to %.4f\n",curr_threshold, val);
-	    kicked_out++;	
-	    if (kicked_fid)
-	      fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
-		node1, node2, rag_node1->get_size(), rag_node2->get_size());
-	    //fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", rag_edge->get_weight(),node1, node2, rag_node1->get_size(), rag_node2->get_size());
-	    
-	    //add_dirty_edge(rag_edge);
-	}
-	return 0;
+		if (dirty && (val <= threshold)) {
+		    ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+		}
+		else{ 
+		    //printf("edge prob changed from %.4f to %.4f\n",curr_threshold, val);
+		    kicked_out++;	
+		    if (kicked_fid)
+		      fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+			node1, node2, rag_node1->get_size(), rag_node2->get_size());
+		    //fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", rag_edge->get_weight(),node1, node2, rag_node1->get_size(), rag_node2->get_size());
+		    
+		    //add_dirty_edge(rag_edge);
+		}
+		return 0;
     }
     return rag_edge; 
 }
