@@ -25,7 +25,7 @@ class MergePriority {
     virtual void initialize_priority(double threshold, bool use_edge_weight=false) = 0;
 
     virtual void initialize_random(double pthreshold) {}
-    virtual vector<RagEdge_t*> get_top_independent_edges (int nbd_size) {}
+    virtual void get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &vec) {}
     virtual void get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_remove_from_queue, vector<RagEdge_t*> &edges_to_process) {}
     virtual RagEdge_t* get_top_edge() = 0;
 
@@ -76,7 +76,7 @@ class ProbPriority : public MergePriority {
     void clear_dirty();
     bool empty();
     RagEdge_t* get_edge_with_iter(EdgeRank_t::iterator iter);
-    vector<RagEdge_t*> get_top_independent_edges (int nbd_size);
+    void get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &vec);
     void get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_remove_from_queue, vector<RagEdge_t*> &edges_to_process);
     RagEdge_t* get_top_edge();
     void add_dirty_edge(RagEdge_t* edge);

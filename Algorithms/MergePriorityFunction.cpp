@@ -262,6 +262,27 @@ RagEdge_t* ProbPriority::get_edge_with_iter(EdgeRank_t::iterator iter)
 
 
 
+inline unsigned int prior_hash(unsigned int a) {
+    a = (a+0x7ed55d16) + (a<<12);
+    a = (a^0xc761c23c) ^ (a>>19);
+    a = (a+0x165667b1) + (a<<5);
+    a = (a+0xd3a2646c) ^ (a<<9);
+    a = (a+0xfd7046c5) + (a<<3);
+    a = (a^0xb55a4f09) ^ (a>>16);
+    return a;
+}
+ 
+
+ 
+inline void prior_update_max(unsigned int* array, int loc, unsigned int prior) {
+    unsigned int old_val;
+    do {
+        old_val = array[loc];
+        if (old_val > prior)
+            return;
+    } while (!__sync_bool_compare_and_swap(&(array[loc]), old_val, prior));
+}
+
 
 inline void prior_update(int array [], int loc, int prior) {
     int old_val;
@@ -272,6 +293,15 @@ inline void prior_update(int array [], int loc, int prior) {
     } while (!__sync_bool_compare_and_swap(&(array[loc]), old_val, prior));
 }
 
+
+inline void prior_update_dist_2(int array [], int loc, int prior) {
+    int old_val;
+    do {
+        old_val = array[loc];
+        if (old_val < prior) 
+            return;
+    } while (!__sync_bool_compare_and_swap(&(array[loc]), old_val, prior));
+}
 
 
 void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_remove_from_queue, vector<RagEdge_t*> &edges_to_process) {
@@ -317,6 +347,7 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
     EdgeRank_t ranking_list [nworkers];
     vector<pair<Node_t, Node_t> > dirty_list [nworkers];
 
+    // cilk
     cilk_for (int i = 0; i < node_pairs_vector.size(); ++i) {
         int worker_id = __cilkrts_get_worker_number();
         double curr_threshold = curr_threshold_vector[i];
@@ -324,12 +355,14 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
         Node_t node2 = node_pairs_vector[i].second;
         RagNode_t* rag_node1 = rag->find_rag_node(node1); 
         RagNode_t* rag_node2 = rag->find_rag_node(node2); 
-        
+    
         if (!(rag_node1 && rag_node2)) {
             continue;
         }
 
+        mu.lock();
         RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+        mu.unlock();
 
         if (!rag_edge) {
             continue;
@@ -352,12 +385,15 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
 
         if (val > (curr_threshold + Epsilon)) {
             if (dirty && (val <= threshold)) {
+                // mu1.lock();
+                // ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+                // mu1.unlock();
                 ranking_list[worker_id].insert(std::make_pair(val, std::make_pair(node1, node2)));
             }
             else{ 
                 //printf("edge prob changed from %.4f to %.4f\n",curr_threshold, val);
                 // kicked_out++;   
-                 __sync_fetch_and_add( &kicked_out, 1);
+                __sync_fetch_and_add( &kicked_out, 1);
                 if (kicked_fid)
                   fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
                 node1, node2, rag_node1->get_size(), rag_node2->get_size());
@@ -368,9 +404,7 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
             continue;
         }
 
-        mu.lock();
-        edges_to_process.push_back(rag_edge);
-        mu.unlock();
+        edges_to_process_list[worker_id].push_back(rag_edge);
     }
     
     for (int i = 0; i < nworkers; ++i) {
@@ -380,54 +414,164 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
         for (vector<pair<Node_t, Node_t> >::iterator it = dirty_list[i].begin(); it != dirty_list[i].end(); ++it) {
             dirty_edges.erase(OrderedPair(it->first, it->second));
         }
-        // for (vector<RagEdge_t*>::iterator it = edges_to_process_list[i].begin(); it != edges_to_process_list[i].end(); ++it) {
-        //     edges_to_process.push_back(*it);
-        // }
-        // edges_to_process_list[i].clear();
+        for (vector<RagEdge_t*>::iterator it = edges_to_process_list[i].begin(); it != edges_to_process_list[i].end(); ++it) {
+            edges_to_process.push_back(*it);
+        }
+        edges_to_process_list[i].clear();
     }
 }
 
 
+map<Node_t, vector<int> > neighbors_cache;
 
-vector<RagEdge_t*> ProbPriority::get_top_independent_edges (int nbd_size) {
+
+void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &edges_to_process) {
     vector<EdgeRank_t::iterator> top_edges;
     int num_edges_looked_at = 0;
     for (EdgeRank_t::iterator it = ranking.begin(); it != ranking.end() && num_edges_looked_at < nbd_size; ++it, ++num_edges_looked_at) {
+        double curr_threshold = (*it).first;
+        if (curr_threshold > threshold)
+            break;
         top_edges.push_back(it);
     }
 
     // do priority updates to see which edges can be processed
     int max_labels = 100000;
-    int node_priority_update_array [max_labels];
+    // int node_priority_update_array_1 [max_labels];
+    // int node_priority_update_array_2 [max_labels];
 
-    for (int i = 0; i < max_labels; ++i) {
-        node_priority_update_array[i] = nbd_size + 1;
-    }
+    // for (int i = 0; i < max_labels; ++i) {
+    //     node_priority_update_array_1[i] = nbd_size + 1;
+    //     node_priority_update_array_2[i] = nbd_size + 1;
+    // }
+    unsigned int* node_priority_update_array_1 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
+    unsigned int* node_priority_update_array_2 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
 
     cilk_for (int i = 0; i < top_edges.size(); ++i) {
         Node_t node1 = (*top_edges[i]).second.first;
         Node_t node2 = (*top_edges[i]).second.second;
 
-        prior_update(node_priority_update_array, (int)node1, i);
-        prior_update(node_priority_update_array, (int)node2, i);
+        prior_update_max(node_priority_update_array_1, (int)node1, prior_hash(i));
+        prior_update_max(node_priority_update_array_1, (int)node2, prior_hash(i));
     }
 
     // check which edge can be processed
-    vector<RagEdge_t*> edges_to_process;
+    // vector<RagEdge_t*> edges_to_process;
     // cout << "NUM TOP EDGES: " << top_edges.size() << endl;
 
+
+
     vector<EdgeRank_t::iterator> edges_to_remove_from_queue;
+
     for (int i = 0; i < top_edges.size(); ++i) {
         Node_t node1 = (*top_edges[i]).second.first;
         Node_t node2 = (*top_edges[i]).second.second;
-        if (node_priority_update_array[(int)node1] == node_priority_update_array[(int)node2]) {
+        // TODO: else do we reset the priority of the first array at those locations?
+        if (node_priority_update_array_1[(int)node1] == node_priority_update_array_1[(int)node2]) {
             edges_to_remove_from_queue.push_back(top_edges[i]);
         }
     }
 
-    get_edges_parallel(edges_to_remove_from_queue, edges_to_process);
 
-    return edges_to_process;
+    /*
+    // =============================== for distance 2 ==============================
+
+    vector<vector<int> > node_ids_vec;
+    vector<EdgeRank_t::iterator> edges_to_remove_from_queue;
+    vector<EdgeRank_t::iterator> edges_for_round_2;
+
+    for (int i = 0; i < top_edges.size(); ++i) {
+        Node_t node1 = (*top_edges[i]).second.first;
+        Node_t node2 = (*top_edges[i]).second.second;
+        // TODO: else do we reset the priority of the first array at those locations?
+        if (node_priority_update_array_1[(int)node1] == node_priority_update_array_1[(int)node2]) {
+            
+            // ================ do distance 2 for both nodes
+            // vector<int> node_ids;
+            // bool valid_1 = true;
+            // if (neighbors_cache.find(node1) == neighbors_cache.end()) {
+            //     valid_1 = rag->get_neighboring_labels(node1, node_ids);
+            //     neighbors_cache[node2] = node_ids;
+            // } else {
+            //     for (vector<int>::iterator it = neighbors_cache[node1].begin(); it != neighbors_cache[node1].end(); ++it)
+            //         node_ids.push_back(*it);
+            // }
+
+            // bool valid_2 = true;
+            // vector<int> node_ids_2;
+            // if (neighbors_cache.find(node2) == neighbors_cache.end()) {
+            //     valid_2 = rag->get_neighboring_labels(node2, node_ids_2);
+            //     neighbors_cache[node2] = node_ids_2;
+            // } else {
+            //     for (vector<int>::iterator it = neighbors_cache[node2].begin(); it != neighbors_cache[node2].end(); ++it)
+            //         node_ids_2.push_back(*it);
+            // }
+            // node_ids.insert(node_ids.end(), node_ids_2.begin(), node_ids_2.end());
+            // if (valid_1 && valid_2) {
+            //     edges_for_round_2.push_back(top_edges[i]);
+            //     node_ids_vec.push_back(node_ids);
+            // }
+
+            // ========= do distance 2 for node_remove only
+            bool valid_2 = true;
+            vector<int> node_ids;
+            // assert(node2 > node1);
+            if (neighbors_cache.find(node2) == neighbors_cache.end()) {
+                valid_2 = rag->get_neighboring_labels(node2, node_ids);
+                neighbors_cache[node2] = node_ids;
+            } else {
+                for (vector<int>::iterator it = neighbors_cache[node2].begin(); it != neighbors_cache[node2].end(); ++it)
+                    node_ids.push_back(*it);
+            }
+            // node_ids.push_back(node1);
+
+            edges_for_round_2.push_back(top_edges[i]);
+            node_ids_vec.push_back(node_ids);
+        }
+    }
+
+
+    // priority update round 2
+    cilk_for (int i = 0; i < edges_for_round_2.size(); i++) {
+        Node_t node1 = (*edges_for_round_2[i]).second.first;
+        Node_t node2 = (*edges_for_round_2[i]).second.second;
+        int priority_tag = node_priority_update_array_1[(int)node1];
+        // do priority update with distance 2
+
+        for (vector<int>::iterator it = node_ids_vec[i].begin(); it != node_ids_vec[i].end(); ++it) {
+        // cilk_for (int j = 0; j < node_ids_vec[i].size(); ++j) {
+            // cout << node_ids_vec[i].size() << endl;
+            // prior_update(node_priority_update_array_2, node_ids_vec[i][j], priority_tag);
+            prior_update_max(node_priority_update_array_2, *it, priority_tag);
+        }
+    }
+
+    // check edges that can be processed in parallel
+    for (int i = 0; i < edges_for_round_2.size(); ++i) {
+        Node_t node1 = (*edges_for_round_2[i]).second.first;
+        int priority_val = node_priority_update_array_1[(int)node1];
+        bool pass = true; 
+        for (int j = 0; j < node_ids_vec[i].size(); ++j) {
+            if (priority_val != node_priority_update_array_2[node_ids_vec[i][j]]) {
+                pass = false;
+                break;
+            }
+        }
+        if (pass) {
+            edges_to_remove_from_queue.push_back(edges_for_round_2[i]);
+        }
+    }
+    */
+
+    if (edges_to_remove_from_queue.size() == 0) {
+        ranking.clear();
+    } else {
+        get_edges_parallel(edges_to_remove_from_queue, edges_to_process);
+    }
+
+    free(node_priority_update_array_1);
+    free(node_priority_update_array_2);
+    // return edges_to_process;
 }
 
 

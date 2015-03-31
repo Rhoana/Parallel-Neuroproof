@@ -113,10 +113,13 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
 
     boost::posix_time::ptime t1 = boost::posix_time::microsec_clock::local_time();
     int loop_count = 0;
+    boost::mutex mu;
     while (!(priority->empty())) {
         loop_count++;
-        vector<RagEdge_t*> edges_to_process = priority->get_top_independent_edges(num_top_edges);
-        for (vector<RagEdge_t*>::iterator it = edges_to_process.begin(); it != edges_to_process.end(); ++it) {
+        vector<RagEdge_t*> edges_to_process;
+        priority->get_top_independent_edges(num_top_edges, edges_to_process);
+        // cout << "Size: " << edges_to_process.size() << endl;
+        cilk_for (vector<RagEdge_t*>::iterator it = edges_to_process.begin(); it != edges_to_process.end(); ++it) {
             RagNode_t* rag_node1 = (*it)->get_node1();
             RagNode_t* rag_node2 = (*it)->get_node2();
 
@@ -130,16 +133,19 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
             Node_t node2 = rag_node2->get_node_id();
             
             // retain node1 
+            // mu.lock();
             stack.merge_labels(node2, node1, &node_combine_alg);
+            // mu.unlock();
         }
     }
+
     boost::posix_time::ptime t2 = boost::posix_time::microsec_clock::local_time();
     cout << "------------------------ TIME AGGLO LOOP: " << (t2 - t1).total_milliseconds() << " ms" << endl;
 
     // cout << "------------------------ TIME TAKING OUT EDGES: " << total_time_take_out/1000000 << " ms" << endl;
     // cout << "------------------------ TIME MERGING NODES: " << total_time_merge/1000000 << " ms" << endl;
     // cout << "------------------------ TIME LOOP OVERHEAD: " << loop_time/1000000 << " ms" << endl;
-    // cout << "AGGLO LOOP COUNT: " << loop_count << endl;
+    cout << "AGGLO LOOP COUNT: " << loop_count << endl;
     
     delete priority;
 }
@@ -281,7 +287,7 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     }
 
     boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
-    agglomerate_stack_parallel(stack, 0.06, use_mito); //0.01 for 250, 0.02 for 500
+    agglomerate_stack(stack, 0.06, use_mito); //0.01 for 250, 0.02 for 500
     boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO FIRST PASS: " << (now - start).total_milliseconds() << " ms\n";
     stack.remove_inclusions();	  	
@@ -343,7 +349,7 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     cout << endl << "------------------------ AGGLO MID LOOP: " << (now - start).total_milliseconds() << " ms\n";
 
     start = boost::posix_time::microsec_clock::local_time();
-    agglomerate_stack_parallel(stack, threshold, use_mito, true);
+    agglomerate_stack(stack, threshold, use_mito, true);
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
 }

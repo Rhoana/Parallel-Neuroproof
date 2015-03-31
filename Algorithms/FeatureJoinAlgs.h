@@ -39,10 +39,15 @@ class FeatureCombine : public RagNodeCombineAlg {
             RagNode<unsigned int>* node_remove)
     {
         if (feature_mgr) {
-            RagEdge_t* edge = rag->find_rag_edge(node_keep, node_remove);
+            RagEdge_t* edge = rag->find_rag_edge_no_probe(node_keep, node_remove);
             assert(edge);
             feature_mgr->merge_features(node_keep, node_remove);
             feature_mgr->remove_edge(edge);
+            // if (edge) {
+            //     feature_mgr->remove_edge(edge);
+            // } else {
+            //     cout << endl << endl << endl << endl << endl << endl << "ASSERT FAILED!!!" << endl << endl << endl << endl << endl << endl;
+            // }
         }
     }
 

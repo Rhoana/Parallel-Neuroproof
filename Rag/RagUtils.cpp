@@ -14,11 +14,89 @@
 #include <boost/graph/graph_traits.hpp>
 #include <queue>
 
+#include <cilk/cilk.h>
+#include <boost/thread/mutex.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+
+#include <unistd.h>
+
 using std::vector;
 using std::tr1::unordered_map;
 using std::tr1::unordered_set;
 
 namespace NeuroProof {
+
+boost::mutex rag_mu;
+// volatile bool rag_printed = false;
+//TODO: create strategy for automatically merging user-defined properties
+void rag_join_nodes_for_parallel(Rag_t& rag, Index_t label_remove, Index_t label_keep, 
+        RagNodeCombineAlg* combine_alg)
+{
+    // iterator through all edges to be removed and transfer them or combine
+    // them to the new body
+    RagNode_t* node_keep = rag.find_rag_node_no_probe(label_keep);
+    RagNode_t* node_remove = rag.find_rag_node_no_probe(label_remove);
+
+    for(RagNode_t::edge_iterator iter = node_remove->edge_begin();
+           iter != node_remove->edge_end(); ++iter) {
+        RagNode_t* other_node = (*iter)->get_other_node(node_remove);
+        if (other_node == node_keep) {
+            continue;
+        }
+
+        // determine status of edge
+        bool preserve = (*iter)->is_preserve();
+        bool false_edge = (*iter)->is_false_edge();
+
+        RagEdge_t* final_edge = rag.find_rag_edge_no_probe(node_keep, other_node);
+
+        if (final_edge) {
+            // merge edges -- does not merge user-defined properties by default
+            preserve = preserve || final_edge->is_preserve(); 
+            false_edge = false_edge && final_edge->is_false_edge(); 
+            final_edge->incr_size((*iter)->get_size());
+            if (combine_alg) {
+                combine_alg->post_edge_join(final_edge, *iter);
+            }
+
+            // specific flag updates for a particular algorithm, will be ignored
+            // if these flags do not exist
+            try {
+                double prob1 = (*iter)->get_property<double>("orig-prob");
+                double prob2 = final_edge->get_property<double>("orig-prob");
+                final_edge->set_property("orig-prob", double(std::min(prob1, prob2)));
+                prob1 = (*iter)->get_property<double>("save-prob");
+                prob2 = final_edge->get_property<double>("save-prob");
+                final_edge->set_property("save-prob", double(std::min(prob1, prob2)));
+            } catch (ErrMsg& msg) {
+            }
+
+        } else {
+            // move old edge to newly created edge
+            final_edge = rag.insert_rag_edge(node_keep, other_node);
+            (*iter)->mv_properties(final_edge); 
+            final_edge->set_size((*iter)->get_size());
+            if (combine_alg) {
+                combine_alg->post_edge_move(final_edge, *iter);
+            }
+        }
+        
+
+        final_edge->set_preserve(preserve); 
+        final_edge->set_false_edge(false_edge); 
+    }
+
+    node_keep->incr_size(node_remove->get_size());
+    node_keep->incr_boundary_size(node_remove->get_boundary_size());
+
+    if (combine_alg) { 
+        combine_alg->post_node_join(node_keep, node_remove);
+    }
+
+    // removes the node and all edges connected to it
+    rag.remove_rag_node(node_remove);  
+}
+
 
 //TODO: create strategy for automatically merging user-defined properties
 void rag_join_nodes(Rag_t& rag, RagNode_t* node_keep, RagNode_t* node_remove, 
@@ -84,6 +162,9 @@ void rag_join_nodes(Rag_t& rag, RagNode_t* node_keep, RagNode_t* node_remove,
     // removes the node and all edges connected to it
     rag.remove_rag_node(node_remove);     
 }
+
+
+
 
 /*!
  * Structure used in bi-connected computation

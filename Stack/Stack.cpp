@@ -12,6 +12,9 @@
 // needed for seeded watershed
 #include <vigra/seededregiongrowing3d.hxx>
 
+#include <boost/thread/mutex.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <cilk/cilk.h>
 
 using std::vector;
 using std::tr1::unordered_set;
@@ -899,19 +902,38 @@ void Stack::update_assignment(Label_t label_remove, Label_t label_keep)
     assignment[label_keep] = max_label;
 }
 
+boost::mutex mu;
+boost::mutex mu1;
+boost::mutex mu2;
+
 void Stack::merge_labels(Label_t label_remove, Label_t label_keep,
         RagNodeCombineAlg* combine_alg, bool ignore_rag)
 {
     // might be unnecessary, does nothing without ground truth
-    update_assignment(label_remove, label_keep);
-    
+    // update_assignment(label_remove, label_keep);
+
+
     // update rag by merging nodes
     if (!ignore_rag && rag) {
-        rag_join_nodes(*rag, rag->find_rag_node(label_keep),
-            rag->find_rag_node(label_remove), combine_alg);  
+        mu.lock();
+        rag_join_nodes_for_parallel(*rag, label_remove, label_keep, combine_alg); 
+        mu.unlock();
+
+        // mu.lock();
+        // rag_join_nodes(*rag, rag->find_rag_node(label_keep),
+        //     rag->find_rag_node(label_remove), combine_alg);  
+        // mu.unlock();
     } 
-    
+
+    // might be unnecessary, does nothing without ground truth
+    mu1.lock();
+    update_assignment(label_remove, label_keep);
+    // mu1.unlock();
+
+    // mu2.lock();   
     labelvol->reassign_label(label_remove, label_keep); 
+    // mu2.unlock();
+    mu1.unlock(); 
 }
 
 VolumeLabelPtr Stack::generate_boundary(VolumeLabelPtr labelvolh)

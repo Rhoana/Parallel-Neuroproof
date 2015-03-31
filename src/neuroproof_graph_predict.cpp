@@ -286,7 +286,7 @@ int main(int argc, char** argv)
     run_prediction(options);
     // run_prediction(options);
 
-    // testing_func();
+    testing_func();
     // cilk_sync;
 
     return 0;

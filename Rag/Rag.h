@@ -63,7 +63,12 @@ class Rag {
      * \return pointer to matching rag node
     */
     RagNode<Region>* find_rag_node(Region region);
+    RagNode<Region>* find_rag_node_no_probe(Region region);
     
+
+    // get a node's neighbors' ids. return boolean value representing valid node
+    bool get_neighboring_labels (Region label, std::vector<int> &vec);
+
     /*!
      * Makes a new rag node on the heap given the unique node identifier
      * \return pointer to new rag node
@@ -79,6 +84,7 @@ class Rag {
      * \return pointer to matching rag edge
     */
     RagEdge<Region>* find_rag_edge(Region region1, Region region2);
+    RagEdge<Region>* find_rag_edge_no_probe(Region region1, Region region2);
     
     /*!
      * Find rag edge given pointers to rag nodes that have an edge between
@@ -88,6 +94,7 @@ class Rag {
      * \return pointer to matching rag edge
     */
     RagEdge<Region>* find_rag_edge(RagNode<Region>* node1, RagNode<Region>* node2);
+    RagEdge<Region>* find_rag_edge_no_probe(RagNode<Region>* node1, RagNode<Region>* node2);
     
     /*!
      * Makes a new rag edge on the heap between two previously created rag nodes
@@ -360,6 +367,25 @@ template <typename Region> inline RagNode<Region>* Rag<Region>::find_rag_node(Re
     }
     return rag_node;
 }
+
+template <typename Region> inline RagNode<Region>* Rag<Region>::find_rag_node_no_probe(Region region)
+{
+    RagNode<Region>* node_to_find = RagNode<Region>::New(Region());
+    node_to_find->set_node_id(region);
+
+    RagNode<Region>* rag_node = 0;
+
+    // boost::mutex::scoped_lock scoped_lock(rag_node_mu);
+    typename NodeHash::iterator rag_node_iter = rag_nodes.find(node_to_find);
+    if (rag_node_iter != rag_nodes.end()) {
+        rag_node = *rag_node_iter;
+    }
+
+    delete node_to_find;
+    return rag_node;
+}
+
+
 template <typename Region> inline RagNode<Region>* Rag<Region>::find_rag_node(RagNode<Region>* node)
 {
     // std::cout << "RAGCHECK" << std::endl;
@@ -372,6 +398,21 @@ template <typename Region> inline RagNode<Region>* Rag<Region>::find_rag_node(Ra
     }
     return rag_node;
 }
+
+
+
+template <typename Region> inline bool Rag<Region>::get_neighboring_labels (Region label, std::vector<int> &vec) {
+    RagNode_t* rag_node = find_rag_node(label);
+    if (!rag_node)
+        return false;
+    for(RagNode_t::edge_iterator iter = rag_node->edge_begin(); iter != rag_node->edge_end(); ++iter) {
+        RagNode_t* other_node = (*iter)->get_other_node(rag_node);
+        int id = other_node->get_node_id();
+        vec.push_back(id);
+    }
+    return true;
+}
+
 
 
 template <typename Region> inline RagEdge<Region>* Rag<Region>::get_probe_edge(Region region1, Region region2)
@@ -399,6 +440,24 @@ template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge(Re
 }
 
 
+template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge_no_probe(Region region1, Region region2)
+{
+    RagEdge<Region>* rag_edge = 0;
+    RagNode<Region>* node1 = RagNode<Region>::New(Region());
+    node1->set_node_id(region1);
+    RagNode<Region>* node2 = RagNode<Region>::New(Region());
+    node2->set_node_id(region2);
+    RagEdge<Region>* edge_to_find = RagEdge<Region>::New(node1, node2);
+    typename EdgeHash::iterator rag_edge_iter = rag_edges.find(edge_to_find);
+    if (rag_edge_iter != rag_edges.end()) {
+        rag_edge = *rag_edge_iter;
+    }
+    delete node1;
+    delete node2;
+    delete edge_to_find;
+    return rag_edge;
+}
+
 template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge(RagNode<Region>* node1, RagNode<Region>* node2)
 {
     RagEdge<Region>* rag_edge = 0;
@@ -408,6 +467,20 @@ template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge(Ra
     }
     return rag_edge;
 }
+
+
+template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge_no_probe(RagNode<Region>* node1, RagNode<Region>* node2)
+{
+    RagEdge<Region>* rag_edge = 0;
+    RagEdge<Region>* edge_to_find = RagEdge<Region>::New(node1, node2);
+    typename EdgeHash::iterator rag_edge_iter = rag_edges.find(edge_to_find);
+    if (rag_edge_iter != rag_edges.end()) {
+        rag_edge = *rag_edge_iter;
+    }
+    delete edge_to_find;
+    return rag_edge;
+}
+
 
 template <typename Region> inline RagEdge<Region>* Rag<Region>::find_rag_edge(RagEdge<Region>* edge)
 {

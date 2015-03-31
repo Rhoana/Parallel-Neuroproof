@@ -48,6 +48,9 @@ class RagEdge;
 void rag_join_nodes(Rag<Index_t>& rag, RagNode<Index_t>* node_keep,
         RagNode<Index_t>* node_remove, RagNodeCombineAlg* combine_alg);
 
+void rag_join_nodes_for_parallel(Rag<Index_t>& rag, Index_t label_remove, Index_t label_keep, 
+        RagNodeCombineAlg* combine_alg);
+
 /*!
  * Computes all of the biconnected components for the given graph
  * \param rag Rag used to compute bi-connected components
