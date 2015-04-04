@@ -94,6 +94,21 @@ inline Node_t get_actual_label (Node_t label, map<Node_t, Node_t> &map) {
 }
 
 
+inline void path_compress(map<Node_t, Node_t> &vertex_id_map) {
+    // trivial implementation. can be more clever
+    for (map<Node_t, Node_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
+        Node_t real_id = it->first;
+        int jumps = 0;
+        while(real_id != vertex_id_map[real_id]) {
+            real_id = vertex_id_map[real_id];
+            jumps++;
+        }
+        assert(jumps <= 1);
+        it->second = real_id;
+    }
+}
+
+
 
 void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshold, bool use_mito, bool use_edge_weight, bool synapse_mode) {
     if (threshold == 0.0) {
@@ -116,10 +131,34 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
     boost::mutex mu;
     while (!(priority->empty())) {
         loop_count++;
+        // cout << loop_count << endl;
         vector<RagEdge_t*> edges_to_process;
         priority->get_top_independent_edges(num_top_edges, edges_to_process);
         // cout << "Size: " << edges_to_process.size() << endl;
-        cilk_for (vector<RagEdge_t*>::iterator it = edges_to_process.begin(); it != edges_to_process.end(); ++it) {
+        map<Node_t, Node_t> vertex_id_map;
+        
+        /*
+        for (vector<RagEdge_t*>::iterator it = edges_to_process.begin(); it != edges_to_process.end(); ++it) {
+            RagNode_t* rag_node1 = (*it)->get_node1();
+            RagNode_t* rag_node2 = (*it)->get_node2();
+
+            // if (use_mito) {
+            //     if (is_mito(rag_node1) || is_mito(rag_node2)) {
+            //         continue;
+            //     }
+            // }
+
+            Node_t node1 = rag_node1->get_node_id(); 
+            Node_t node2 = rag_node2->get_node_id();
+
+            // retain node1 
+            stack.merge_labels(node2, node1, &node_combine_alg);
+        }
+        */
+
+
+        // step 1: update vertex_id_map and merge nodes data only
+        for (vector<RagEdge_t*>::iterator it = edges_to_process.begin(); it != edges_to_process.end(); ++it) {
             RagNode_t* rag_node1 = (*it)->get_node1();
             RagNode_t* rag_node2 = (*it)->get_node2();
 
@@ -132,11 +171,19 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
             Node_t node1 = rag_node1->get_node_id(); 
             Node_t node2 = rag_node2->get_node_id();
             
+            vertex_id_map[node1] = node1;
+            vertex_id_map[node2] = node1;
+
             // retain node1 
-            // mu.lock();
-            stack.merge_labels(node2, node1, &node_combine_alg);
-            // mu.unlock();
+            stack.merge_node_data_only(node2, node1, &node_combine_alg);
         }
+
+
+        // path compression
+        // path_compress(vertex_id_map);
+
+        // step 2: use vertex_id_map to update the edges
+        stack.update_edges_based_on_vertex_id_map (vertex_id_map, &node_combine_alg);
     }
 
     boost::posix_time::ptime t2 = boost::posix_time::microsec_clock::local_time();
@@ -353,6 +400,11 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
 }
+
+
+
+
+
 
 void agglomerate_stack_queue(Stack& stack, double threshold, 
                                 bool use_mito, bool use_edge_weight)

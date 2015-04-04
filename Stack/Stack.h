@@ -87,6 +87,14 @@ class Stack : public StackBase {
     void merge_labels(Label_t label_remove, Label_t label_keep,
             RagNodeCombineAlg* combine_alg, bool ignore_rag = false);
 
+
+    // Move data from label_remove to label_keep without looking at edges incident to the two nodes
+    bool merge_node_data_only(Label_t label_remove, Label_t label_keep, RagNodeCombineAlg* combine_alg, bool ignore_rag = false);
+
+    // add or update new edges based on vertex id map
+    void update_edges_based_on_vertex_id_map(std::map<Label_t, Label_t> &vertex_id_map, RagNodeCombineAlg* combine_alg);
+
+
     /*!
      * Algorithms to absorb small regions by first removing them and then
      * calling a seeded watershed to fill in this empty regions.  The size

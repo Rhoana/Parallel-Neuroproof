@@ -26,6 +26,173 @@ using std::tr1::unordered_set;
 
 namespace NeuroProof {
 
+
+inline Index_t get_real_id (Index_t label, std::map<Index_t, Index_t>& vertex_id_map) {
+    if (vertex_id_map.find(label) != vertex_id_map.end())
+        return vertex_id_map[label];
+    return label;
+}
+
+
+// void update_new_edges (Rag_t& rag, std::map<Index_t, Index_t>& vertex_id_map, std::map<RagEdge_t*, vector<RagEdge_t*> > &edge_dependency_map_new, 
+//                                             std::map<RagEdge_t*, vector<RagEdge_t*> > &edge_dependency_map_update, RagNodeCombineAlg* combine_alg) {
+// void update_new_edges (Rag_t& rag, std::map<Index_t, Index_t>& vertex_id_map, std::map<std::pair<Index_t, Index_t>, std::set<RagEdge_t*> > &edge_dependency_map, 
+//                                                                                             RagNodeCombineAlg* combine_alg) {
+void update_new_edges (Rag_t& rag, std::map<Index_t, Index_t>& vertex_id_map, RagNodeCombineAlg* combine_alg) {
+    std::map<std::pair<Index_t, Index_t>, std::set<RagEdge_t*> > edge_dependency_map;
+    for (std::map<Index_t, Index_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
+        if (it->first == it->second)
+            continue;
+
+        Index_t node_keep_id = it->second;
+        RagNode_t* node_remove = rag.find_rag_node_no_probe(it->first);
+        RagNode_t* node_keep   = rag.find_rag_node_no_probe(it->second);
+        // go through neighbors of node_remove
+        for (RagNode_t::edge_iterator iter = node_remove->edge_begin(); iter != node_remove->edge_end(); ++iter) {
+            RagNode_t* neighbor_node = (*iter)->get_other_node(node_remove);
+            if (neighbor_node == node_keep) {
+                continue;
+            }    
+
+            Index_t neighbor_id = neighbor_node->get_node_id();
+            Index_t neighbor_real_id = get_real_id(neighbor_id, vertex_id_map);
+            if (neighbor_id != neighbor_real_id) {
+                neighbor_node = rag.find_rag_node_no_probe(neighbor_real_id);
+            }
+
+            RagEdge_t* final_edge = rag.find_rag_edge_no_probe(node_keep, neighbor_node);
+            if (final_edge) {
+                // just update. make this atomic for parallel
+                final_edge->incr_size((*iter)->get_size());
+                if (combine_alg) {
+                    // put lock around this
+                    // std::cout << "CHECK1" << std::endl;
+                    combine_alg->post_edge_join(final_edge, *iter);
+                    // std::cout << "CHECK2" << std::endl;
+                }
+                bool preserve = (*iter)->is_preserve();
+                bool false_edge = (*iter)->is_false_edge();
+                preserve = preserve || final_edge->is_preserve(); 
+                false_edge = false_edge && final_edge->is_false_edge(); 
+                final_edge->set_preserve(preserve); 
+                final_edge->set_false_edge(false_edge); 
+
+            } else {
+                std::pair <Index_t, Index_t> new_pair;
+                if (neighbor_real_id < node_keep_id) {
+                    new_pair = std::make_pair (neighbor_real_id, node_keep_id);
+                } else {
+                    new_pair = std::make_pair (node_keep_id, neighbor_real_id);
+                }
+
+                if (edge_dependency_map.find(new_pair) == edge_dependency_map.end()) {
+                    std::set<RagEdge_t*> edge_set;
+                    edge_dependency_map[new_pair] = edge_set;
+                }
+                edge_dependency_map[new_pair].insert(*iter);
+            }
+        }
+    }
+
+    for (std::map<std::pair<Index_t, Index_t>, std::set<RagEdge_t*> >::iterator it1 = edge_dependency_map.begin(); it1 != edge_dependency_map.end(); ++it1) {
+        RagNode_t* node1 = rag.find_rag_node_no_probe(it1->first.first);
+        RagNode_t* node2 = rag.find_rag_node_no_probe(it1->first.second);
+        RagEdge_t* new_edge = rag.insert_rag_edge(node1, node2);
+        for (std::set<RagEdge_t*>::iterator it2 = it1->second.begin(); it2 != it1->second.end(); ++it2) {
+            bool preserve = (*it2)->is_preserve();
+            bool false_edge = (*it2)->is_false_edge();
+            new_edge->incr_size((*it2)->get_size());
+            (*it2)->mv_properties(new_edge); 
+            new_edge->set_size((*it2)->get_size());
+            if (combine_alg) {
+                combine_alg->post_edge_move(new_edge, *it2);
+            }   
+            new_edge->set_preserve(preserve); 
+            new_edge->set_false_edge(false_edge); 
+        }
+        it1->second.clear();
+    }
+
+    // delete nodes
+    for (std::map<Index_t, Index_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
+        if (it->first != it->second) {
+            RagNode_t* node_to_remove = rag.find_rag_node_no_probe(it->first);
+            RagNode_t* node_to_keep = rag.find_rag_node_no_probe(it->second);
+            if (node_to_remove) {
+                if (combine_alg) { 
+                    combine_alg->post_node_join(node_to_keep, node_to_remove);
+                }
+                rag.remove_rag_node(node_to_remove);
+            }
+        }
+    }
+}
+
+
+void update_new_edges_and_data(Rag_t& rag, RagNode_t* node_remove, RagNode_t* node_keep, 
+                            std::map<Index_t, Index_t>& vertex_id_map, RagNodeCombineAlg* combine_alg) {
+    for(RagNode_t::edge_iterator iter = node_remove->edge_begin(); iter != node_remove->edge_end(); ++iter) {
+        RagNode_t* neighbor_node = (*iter)->get_other_node(node_remove);
+        if (neighbor_node == node_keep) {
+            continue;
+        }
+        // determine status of edge
+        bool preserve = (*iter)->is_preserve();
+        bool false_edge = (*iter)->is_false_edge();
+
+        Index_t neighbor_id = neighbor_node->get_node_id();
+        Index_t neighbor_real_id = get_real_id(neighbor_id, vertex_id_map);
+        if (neighbor_id != neighbor_real_id) {
+            neighbor_node = rag.find_rag_node_no_probe(neighbor_real_id);
+        }
+
+        RagEdge_t* final_edge = rag.find_rag_edge_no_probe(node_keep, neighbor_node);
+        if (final_edge) {
+            // merge edges -- does not merge user-defined properties by default
+            preserve = preserve || final_edge->is_preserve(); 
+            false_edge = false_edge && final_edge->is_false_edge(); 
+            final_edge->incr_size((*iter)->get_size());
+            if (combine_alg) {
+                combine_alg->post_edge_join(final_edge, *iter);
+            }
+
+            // specific flag updates for a particular algorithm, will be ignored
+            // if these flags do not exist
+            try {
+                double prob1 = (*iter)->get_property<double>("orig-prob");
+                double prob2 = final_edge->get_property<double>("orig-prob");
+                final_edge->set_property("orig-prob", double(std::min(prob1, prob2)));
+                prob1 = (*iter)->get_property<double>("save-prob");
+                prob2 = final_edge->get_property<double>("save-prob");
+                final_edge->set_property("save-prob", double(std::min(prob1, prob2)));
+            } catch (ErrMsg& msg) {
+            }
+        } else {
+            // move old edge to newly created edge
+            final_edge = rag.insert_rag_edge(node_keep, neighbor_node);
+            (*iter)->mv_properties(final_edge); 
+            final_edge->set_size((*iter)->get_size());
+            if (combine_alg) {
+                combine_alg->post_edge_move(final_edge, *iter);
+            }
+        }
+
+        final_edge->set_preserve(preserve); 
+        final_edge->set_false_edge(false_edge); 
+    }
+    
+
+    if (combine_alg) { 
+        combine_alg->post_node_join(node_keep, node_remove);
+    }
+
+    rag.remove_rag_node(node_remove);
+
+    return;
+}
+
+
+
 boost::mutex rag_mu;
 // volatile bool rag_printed = false;
 //TODO: create strategy for automatically merging user-defined properties

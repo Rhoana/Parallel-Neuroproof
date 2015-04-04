@@ -902,6 +902,52 @@ void Stack::update_assignment(Label_t label_remove, Label_t label_keep)
     assignment[label_keep] = max_label;
 }
 
+
+
+
+void Stack::update_edges_based_on_vertex_id_map(map<Label_t, Label_t> &vertex_id_map, RagNodeCombineAlg* combine_alg) {
+    // make sure to remove edges from this map before deleting anything
+    map<RagEdge_t*, vector<RagEdge_t*> > edge_dependency_map;
+    update_new_edges(*rag, vertex_id_map, combine_alg);
+    // for (map<Label_t, Label_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
+    //     if (it->first == it->second)
+    //         continue;
+
+    //     RagNode_t* node_remove = rag->find_rag_node_no_probe(it->first);
+    //     RagNode_t* node_keep   = rag->find_rag_node_no_probe(it->second);
+    //     // go through neighbors of node_remove
+    //     update_new_edges_and_data(*rag, node_remove, node_keep, vertex_id_map, combine_alg);
+    // }
+
+    // for (map<Label_t, Label_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
+    //     if (it->first == it->second)
+    //         continue;
+    //     rag->remove_rag_node(rag->find_rag_node(it->first));  
+    // }
+}
+
+
+
+
+bool Stack::merge_node_data_only(Label_t label_remove, Label_t label_keep, RagNodeCombineAlg* combine_alg, bool ignore_rag) {
+    bool merged = false;
+    if (!ignore_rag && rag) {
+        RagNode_t* node_keep = rag->find_rag_node_no_probe(label_keep);
+        RagNode_t* node_remove = rag->find_rag_node_no_probe(label_remove);
+        node_keep->incr_size(node_remove->get_size());
+        node_keep->incr_boundary_size(node_remove->get_boundary_size());
+        // if (combine_alg) { 
+        //     combine_alg->post_node_join(node_keep, node_remove);
+        // }
+        merged = true;
+    }    
+    
+    update_assignment(label_remove, label_keep);
+    labelvol->reassign_label(label_remove, label_keep); 
+    return merged;
+}
+
+
 boost::mutex mu;
 boost::mutex mu1;
 boost::mutex mu2;

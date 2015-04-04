@@ -355,6 +355,16 @@ template <typename Region> inline RagEdge<Region>* Rag<Region>::insert_rag_edge(
     return edge;
 }
 
+// // create and edge between two nodes but does not add it to the nodes and the rag_edges set
+// template <typename Region> inline RagEdge<Region>* Rag<Region>::create_rag_edge(RagNode<Region>* rag_node1, RagNode<Region>* rag_node2) {
+//     RagEdge<Region>* edge = RagEdge<Region>::New(rag_node1, rag_node2);
+//     if (rag_edges.find(edge) != rag_edges.end()) {
+//         throw ErrMsg("Reinserting an edge into the Rag");
+//     } 
+//     return edge;
+// }
+
+
 template <typename Region> inline RagNode<Region>* Rag<Region>::find_rag_node(Region region)
 {
     probe_rag_node->set_node_id(region);

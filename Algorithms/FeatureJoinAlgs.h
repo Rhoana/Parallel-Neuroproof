@@ -31,6 +31,7 @@ class FeatureCombine : public RagNodeCombineAlg {
                 feature_mgr->merge_features(edge_keep, edge_remove);
             } else {
                 feature_mgr->remove_edge(edge_remove);
+                std::cout << "REMOVING EDGE" << std::endl;
             }
         }
     }

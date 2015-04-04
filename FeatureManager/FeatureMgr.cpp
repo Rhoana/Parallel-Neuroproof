@@ -566,15 +566,32 @@ void FeatureMgr::merge_features(RagEdge_t* edge1, RagEdge_t* edge2)
         edge2_caches = &(edge_caches[edge2]);
     }
 
-    unsigned int pos = 0;
-    vector<double> feature_results;
-    for (int i = 0; i < num_channels; ++i) {
-        vector<FeatureCompute*>& features = channels_features[i];
-        for (int j = 0; j < features.size(); ++j) {
-            if ((*edge1_caches)[pos] && (*edge2_caches)[pos]) {
-                features[j]->merge_cache((*edge1_caches)[pos], (*edge2_caches)[pos]);
+    // unsigned int pos = 0;
+    // vector<double> feature_results;
+    // for (int i = 0; i < num_channels; ++i) {
+    //     vector<FeatureCompute*>& features = channels_features[i];
+    //     for (int j = 0; j < features.size(); ++j) {
+    //         std::cout << "CHECK 1" << std::endl;
+    //         std::cout << (*edge2_caches).size() << "," << pos << std::endl;
+    //         std::cout << "CHECK 2" << std::endl;
+    //         if ((*edge1_caches)[pos] && (*edge2_caches)[pos]) {
+    //             features[j]->merge_cache((*edge1_caches)[pos], (*edge2_caches)[pos]);
+    //         }
+    //         ++pos;
+    //     }
+    // }
+
+    if (edge1_caches && edge2_caches) {
+        unsigned int pos = 0;
+        vector<double> feature_results;
+        for (int i = 0; i < num_channels; ++i) {
+            vector<FeatureCompute*>& features = channels_features[i];
+            for (int j = 0; j < features.size(); ++j) {
+                if ((*edge1_caches)[pos] && (*edge2_caches)[pos]) {
+                    features[j]->merge_cache((*edge1_caches)[pos], (*edge2_caches)[pos]);
+                }
+                ++pos;
             }
-            ++pos;
         }
     }
 

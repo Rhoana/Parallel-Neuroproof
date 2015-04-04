@@ -51,6 +51,13 @@ void rag_join_nodes(Rag<Index_t>& rag, RagNode<Index_t>* node_keep,
 void rag_join_nodes_for_parallel(Rag<Index_t>& rag, Index_t label_remove, Index_t label_keep, 
         RagNodeCombineAlg* combine_alg);
 
+
+void update_new_edges_and_data(Rag<Index_t>& rag, RagNode<Index_t>* node_remove, RagNode<Index_t>* node_keep, 
+                            std::map<Index_t, Index_t> &vertex_id_map, RagNodeCombineAlg* combine_alg);
+
+void update_new_edges (Rag<Index_t>& rag, std::map<Index_t, Index_t>& vertex_id_map, RagNodeCombineAlg* combine_alg); 
+
+
 /*!
  * Computes all of the biconnected components for the given graph
  * \param rag Rag used to compute bi-connected components

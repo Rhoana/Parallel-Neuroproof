@@ -294,6 +294,7 @@ inline void prior_update(int array [], int loc, int prior) {
 }
 
 
+// irrelevant
 inline void prior_update_dist_2(int array [], int loc, int prior) {
     int old_val;
     do {
@@ -437,6 +438,7 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
 
     // do priority updates to see which edges can be processed
     int max_labels = 100000;
+
     // int node_priority_update_array_1 [max_labels];
     // int node_priority_update_array_2 [max_labels];
 
@@ -444,6 +446,7 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
     //     node_priority_update_array_1[i] = nbd_size + 1;
     //     node_priority_update_array_2[i] = nbd_size + 1;
     // }
+
     unsigned int* node_priority_update_array_1 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
     unsigned int* node_priority_update_array_2 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
 
@@ -453,6 +456,8 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
 
         prior_update_max(node_priority_update_array_1, (int)node1, prior_hash(i));
         prior_update_max(node_priority_update_array_1, (int)node2, prior_hash(i));
+        // prior_update(node_priority_update_array_1, (int)node1, i);
+        // prior_update(node_priority_update_array_1, (int)node2, i);
     }
 
     // check which edge can be processed
