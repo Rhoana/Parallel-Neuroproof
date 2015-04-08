@@ -76,6 +76,7 @@ void ProbPriority::initialize_priority(double threshold_, bool use_edge_weight)
 
     // cilk::reducer< cilk::op_list_append<char> > letters_reducer;
     int nworkers = __cilkrts_get_nworkers(); // CILK_NWORKERS
+    initialize_dirty_edges_storage(nworkers);
     vector<int> indices_lists [nworkers];
 
     cilk_for (int i = 0; i < num_edges; i++) {
@@ -119,64 +120,183 @@ void ProbPriority::initialize_random(double pthreshold){
 
     threshold = pthreshold;
     for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
-	if (valid_edge(*iter)) {
+    	if (valid_edge(*iter)) {
 
-	    double val1 = feature_mgr->get_prob(*iter);
-	    (*iter)->set_weight(val1);
+    	    double val1 = feature_mgr->get_prob(*iter);
+    	    (*iter)->set_weight(val1);
 
-	    if (val1 <= threshold){ 
-		srand ( time(NULL) );
-		double val= rand()*(threshold/ RAND_MAX);
+    	    if (val1 <= threshold){ 
+    		srand ( time(NULL) );
+    		double val= rand()*(threshold/ RAND_MAX);
 
-		(*iter)->set_weight(val);
-		ranking.insert(std::make_pair(val, std::make_pair((*iter)->get_node1()->get_node_id(), (*iter)->get_node2()->get_node_id())));
-	    }
-	}
+    		(*iter)->set_weight(val);
+    		ranking.insert(std::make_pair(val, std::make_pair((*iter)->get_node1()->get_node_id(), (*iter)->get_node2()->get_node_id())));
+    	    }
+    	}
     }
 }
    
 void ProbPriority::clear_dirty()
 {
-    for (Dirty_t::iterator iter = dirty_edges.begin(); iter != dirty_edges.end(); ++iter) {
-	Node_t node1 = (*iter).region1;
-	Node_t node2 = (*iter).region2;
-	RagNode_t* rag_node1 = rag->find_rag_node(node1); 
-	RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+    // cilk_for (std::vector<std::map<unsigned int, std::map<unsigned int, bool> > >::iterator it1 = dirty_edges_storage.begin(); 
+    //                                     it1 != dirty_edges_storage.end(); ++it1) {
+    //     cilk_for (std::map<unsigned int, std::map<unsigned int, bool> >::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
+    //         Node_t node1 = it2->first;
+    //         for (std::map<unsigned int, bool>::iterator it3 = it2->second.begin(); it3 != it2->second.end(); ++it3) {
+    //             if (it3->second) {
+    //                 Node_t node2 = it3->first;
+    //                 RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
+    //                 RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
 
-	if (!(rag_node1 && rag_node2)) {
-	    continue;
-	}
-	RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+    //                 if (!(rag_node1 && rag_node2)) {
+    //                     continue;
+    //                 }
+    //                 RagEdge_t* rag_edge = rag->find_rag_edge_no_probe(rag_node1, rag_node2);
 
-	if (!rag_edge) {
-	    continue;
-	}
+    //                 if (!rag_edge) {
+    //                     continue;
+    //                 }
 
-	assert(rag_edge->is_dirty());
-	rag_edge->set_dirty(false);
+    //                 // assert(rag_edge->is_dirty());
+    //                 dirty_lock.lock();
+    //                 if (!rag_edge->is_dirty()) {
+    //                     dirty_lock.unlock();
+    //                     continue;
+    //                 }
 
-	if (valid_edge(rag_edge)) {
-	    double val = feature_mgr->get_prob(rag_edge);
-	    rag_edge->set_weight(val);
+    //                 rag_edge->set_dirty(false);
+    //                 dirty_lock.unlock();
 
-	    if (val <= threshold) {
-		ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
-	    }
-	    else{ 
-		kicked_out++;	
-		if (kicked_fid)
-		  fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
-		    node1, node2, rag_node1->get_size(), rag_node2->get_size());
-	    }
-	}
+    //                 if (valid_edge(rag_edge)) {
+    //                     double val = feature_mgr->get_prob(rag_edge);
+    //                     rag_edge->set_weight(val);
+
+    //                     if (val <= threshold) {
+    //                         ranking_lock.lock();
+    //                         ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+    //                         ranking_lock.unlock();
+    //                     }
+    //                     else{ 
+    //                         kicked_out++;   
+    //                         if (kicked_fid)
+    //                         fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+    //                             node1, node2, rag_node1->get_size(), rag_node2->get_size());
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //     }
+    //     it1->clear();
+    // }
+
+
+    boost::mutex ranking_lock;
+
+    Dirty_t delete_list;
+    vector<OrderedPair> delete_vec;
+    for (std::vector<Dirty_t>::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
+        for (Dirty_t::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
+            size_t size_before = delete_list.size();
+            delete_list.insert(*it2);
+            if (size_before != delete_list.size())
+                delete_vec.push_back(*it2);
+        }
+        it1->clear();
     }
-    dirty_edges.clear();
+
+    cilk_for (vector<OrderedPair>::iterator it = delete_vec.begin(); it != delete_vec.end(); ++it) {
+        Node_t node1 = it->region1;
+        Node_t node2 = it->region2;
+        RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
+        RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
+
+        if (!(rag_node1 && rag_node2)) {
+            continue;
+        }
+        RagEdge_t* rag_edge = rag->find_rag_edge_no_probe(rag_node1, rag_node2);
+
+        if (!rag_edge) {
+            continue;
+        }
+
+        // assert(rag_edge->is_dirty());
+
+        if (!rag_edge->is_dirty()) { 
+            continue;
+        }
+
+        rag_edge->set_dirty(false);
+
+        if (valid_edge(rag_edge)) {
+            double val = feature_mgr->get_prob(rag_edge);
+            rag_edge->set_weight(val);
+
+            if (val <= threshold) {
+                ranking_lock.lock();
+                ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+                ranking_lock.unlock();
+            }
+            else{ 
+            kicked_out++;   
+            if (kicked_fid)
+              fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+                node1, node2, rag_node1->get_size(), rag_node2->get_size());
+            }
+        }
+    }
+    
+    // cilk_for (std::vector<Dirty_t>::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
+    //     for (Dirty_t::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {        
+    //         Node_t node1 = it2->region1;
+    //         Node_t node2 = it2->region2;
+    //         RagNode_t* rag_node1 = rag->find_rag_node(node1); 
+    //         RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+
+    //         if (!(rag_node1 && rag_node2)) {
+    //             continue;
+    //         }
+    //         RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+
+    //         if (!rag_edge) {
+    //             continue;
+    //         }
+
+    //         // assert(rag_edge->is_dirty());
+    //         dirty_lock.lock();
+    //         if (!rag_edge->is_dirty()) { 
+    //             dirty_lock.unlock();
+    //             continue;
+    //         }
+
+    //         rag_edge->set_dirty(false);
+    //         dirty_lock.unlock();
+
+    //         if (valid_edge(rag_edge)) {
+    //             double val = feature_mgr->get_prob(rag_edge);
+    //             rag_edge->set_weight(val);
+
+    //             if (val <= threshold) {
+    //                 ranking_lock.lock();
+    //                 ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+    //                 ranking_lock.unlock();
+    //             }
+    //             else{ 
+    //             kicked_out++;   
+    //             if (kicked_fid)
+    //               fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+    //                 node1, node2, rag_node1->get_size(), rag_node2->get_size());
+    //             }
+    //         }
+    //     }
+    //     it1->clear();
+    // }
 }
+
 
 bool ProbPriority::empty()
 {
     if (ranking.empty()) {
-	clear_dirty();
+        clear_dirty();
     }
     return ranking.empty();
 }
@@ -235,7 +355,7 @@ RagEdge_t* ProbPriority::get_edge_with_iter(EdgeRank_t::iterator iter)
         rag_edge->set_weight(val);
         rag_edge->set_dirty(false);
         mu2.lock();
-        dirty_edges.erase(OrderedPair(node1, node2));
+        erase_from_dirty_edges_storage(node1, node2);
         mu2.unlock();
     }
     
@@ -413,7 +533,8 @@ void ProbPriority::get_edges_parallel (vector<EdgeRank_t::iterator> &edges_to_re
             ranking.insert(*it);
         }
         for (vector<pair<Node_t, Node_t> >::iterator it = dirty_list[i].begin(); it != dirty_list[i].end(); ++it) {
-            dirty_edges.erase(OrderedPair(it->first, it->second));
+            // dirty_edges.erase(OrderedPair(it->first, it->second));
+            erase_from_dirty_edges_storage(it->first, it->second);
         }
         for (vector<RagEdge_t*>::iterator it = edges_to_process_list[i].begin(); it != edges_to_process_list[i].end(); ++it) {
             edges_to_process.push_back(*it);
@@ -648,12 +769,50 @@ RagEdge_t* ProbPriority::get_top_edge()
 void ProbPriority::add_dirty_edge(RagEdge_t* edge)
 {
     if (valid_edge(edge)) {
-	edge->set_dirty(true);
-	dirty_edges.insert(OrderedPair(edge->get_node1()->get_node_id(), edge->get_node2()->get_node_id()));
+    	edge->set_dirty(true);
+    	dirty_edges.insert(OrderedPair(edge->get_node1()->get_node_id(), edge->get_node2()->get_node_id()));
+    }  
+}
+
+
+void ProbPriority::add_dirty_edge_parallel(RagEdge_t* edge, int worker_id)
+{
+    // if (valid_edge(edge)) {
+    //     edge->set_dirty(true);
+    //     int node1 = edge->get_node1()->get_node_id();
+    //     int node2 = edge->get_node2()->get_node_id();
+    //     dirty_edges_storage[worker_id][node1][node2] = true;
+    // }
+
+    if (valid_edge(edge)) {
+        edge->set_dirty(true);
+        int node1 = edge->get_node1()->get_node_id();
+        int node2 = edge->get_node2()->get_node_id();
+        dirty_edges_storage[worker_id].insert(OrderedPair(node1, node2));
     }
 }
 
 
+void ProbPriority::initialize_dirty_edges_storage(int num_workers) {
+    for (int i = 0; i < num_workers; ++i) {
+        // std::map<unsigned int, std::map<unsigned int, bool> > map_item;
+        Dirty_t map_item;
+        dirty_edges_storage.push_back(map_item);
+    }
+}
+
+
+void ProbPriority::erase_from_dirty_edges_storage(Node_t node1, Node_t node2) {
+    // for (std::vector<std::map<unsigned int, std::map<unsigned int, bool> > >::iterator it = dirty_edges_storage.begin(); 
+    //                                         it != dirty_edges_storage.end(); ++it) {
+    //     if (it->find(node1) != it->end())
+    //         (*it)[node1][node2] = false;
+    // }   
+    for (std::vector<Dirty_t>::iterator it = dirty_edges_storage.begin(); 
+                                            it != dirty_edges_storage.end(); ++it) {
+        it->erase(OrderedPair(node1, node2));
+    } 
+}
 
 
 
@@ -686,30 +845,30 @@ void MitoPriority::initialize_priority(double threshold_, bool use_edge_weight)
 void MitoPriority::clear_dirty()
 {
     for (Dirty_t::iterator iter = dirty_edges.begin(); iter != dirty_edges.end(); ++iter) {
-	Node_t node1 = (*iter).region1;
-	Node_t node2 = (*iter).region2;
-	RagNode_t* rag_node1 = rag->find_rag_node(node1); 
-	RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+    	Node_t node1 = (*iter).region1;
+    	Node_t node2 = (*iter).region2;
+    	RagNode_t* rag_node1 = rag->find_rag_node(node1); 
+    	RagNode_t* rag_node2 = rag->find_rag_node(node2); 
 
-	if (!(rag_node1 && rag_node2)) {
-	    continue;
-	}
-	RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+    	if (!(rag_node1 && rag_node2)) {
+    	    continue;
+    	}
+    	RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
 
-	if (!rag_edge) {
-	    continue;
-	}
+    	if (!rag_edge) {
+    	    continue;
+    	}
 
-	assert(rag_edge->is_dirty());
-	rag_edge->set_dirty(false);
+    	assert(rag_edge->is_dirty());
+    	rag_edge->set_dirty(false);
 
-	if (valid_edge(rag_edge)) {
-	    double val = 1 - mito_boundary_ratio(rag_edge);
+    	if (valid_edge(rag_edge)) {
+    	    double val = 1 - mito_boundary_ratio(rag_edge);
 
-	    if (val < threshold) {
-		ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
-	    }
-	}
+    	    if (val < threshold) {
+    		  ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+    	    }
+    	}
     }
     dirty_edges.clear();
 }
@@ -717,7 +876,7 @@ void MitoPriority::clear_dirty()
 bool MitoPriority::empty()
 {
     if (ranking.empty()) {
-	clear_dirty();
+        clear_dirty();
     }
     return ranking.empty();
 }
@@ -781,8 +940,12 @@ RagEdge_t* MitoPriority::get_top_edge()
 void MitoPriority::add_dirty_edge(RagEdge_t* edge)
 {
     if (valid_edge(edge)) {
-	edge->set_dirty(true);
-	dirty_edges.insert(OrderedPair(edge->get_node1()->get_node_id(), edge->get_node2()->get_node_id()));
+    	edge->set_dirty(true);
+    	dirty_edges.insert(OrderedPair(edge->get_node1()->get_node_id(), edge->get_node2()->get_node_id()));
     }
 }
+
+
+
+
 

@@ -213,6 +213,10 @@ class FeatureMgr {
 
     void mv_features(RagEdge_t* edge2, RagEdge_t* edge1);
 
+    void delete_edges(std::vector<RagEdge_t*> &edge_vec);
+    void delete_nodes(std::vector<RagNode_t*> &node_vec);
+    bool mv_features_no_delete(RagEdge_t* edge2, RagEdge_t* edge1);
+
     void remove_edge(RagEdge_t* edge);
 
     void remove_node(RagNode_t* node)
@@ -235,6 +239,8 @@ class FeatureMgr {
     void merge_features(RagNode_t* node1, RagNode_t* node2);
     void merge_features2(RagNode_t* node1, RagNode_t* node2, RagEdge_t* edge );
     void merge_features(RagEdge_t* edge1, RagEdge_t* edge2);
+    bool merge_features_no_delete(RagEdge_t* edge1, RagEdge_t* edge2); 
+    bool merge_features_no_delete(RagNode_t* node1, RagNode_t* node2);
 
     void set_classifier(EdgeClassifier* pclfr)
     {

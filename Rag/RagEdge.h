@@ -157,6 +157,7 @@ class RagEdge : public RagElement {
      * \param incr size of edge increment
     */
     void incr_size(unsigned long long incr = 1);
+    void incr_size_atomic(unsigned long long incr = 1);
 
     /*!
      * Boolean comparison between edges based on node id order
@@ -341,6 +342,11 @@ template<typename Region> inline void RagEdge<Region>::set_size(unsigned long lo
 template<typename Region> inline void RagEdge<Region>::incr_size(unsigned long long incr)
 {
     edge_size += incr;
+}
+
+template<typename Region> inline void RagEdge<Region>::incr_size_atomic(unsigned long long incr)
+{
+    __sync_add_and_fetch(&edge_size, incr);
 }
 
 template<typename Region> inline RagEdge<Region>::RagEdge(const RagEdge<Region>& edge2) :

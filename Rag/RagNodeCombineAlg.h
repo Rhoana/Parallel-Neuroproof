@@ -8,6 +8,9 @@
 #define RAGNODECOMBINEALG_H
 
 #include "../Utilities/Glb.h"
+#include <set>
+#include <map>
+#include <vector>
 
 namespace NeuroProof {
 
@@ -45,6 +48,11 @@ class RagNodeCombineAlg {
     */
     virtual void post_edge_join(RagEdge<Index_t>* edge_keep,
             RagEdge<Index_t>* edge_remove) = 0;
+
+    // same as above but update many pairs in parallel
+    // virtual void post_edge_join_parallel(std::set<std::pair<RagEdge<Index_t>*, RagEdge<Index_t>*> > &edge_pairs) {}
+    virtual void post_edge_join_parallel(std::map<RagEdge<Index_t>*, std::set<RagEdge<Index_t>*> > &edge_pairs) {}
+    virtual void post_node_join_parallel(std::vector<std::pair<RagNode<Index_t>*, RagNode<Index_t>*> > &node_pairs) {}
 
     /*!
      * Actions that should be done after internal node values are

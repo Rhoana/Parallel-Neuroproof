@@ -22,6 +22,30 @@ void FeatureMgr::set_basic_features()
 }
 #endif
 
+
+void FeatureMgr::delete_edges(std::vector<RagEdge_t*> &edge_vec) {
+    for (std::vector<RagEdge_t*>::iterator it = edge_vec.begin(); it != edge_vec.end(); ++it)
+        edge_caches.erase(*it);
+}
+
+
+void FeatureMgr::delete_nodes(std::vector<RagNode_t*> &node_vec) {
+    for (std::vector<RagNode_t*>::iterator it = node_vec.begin(); it != node_vec.end(); ++it)
+        node_caches.erase(*it);
+}
+
+
+bool FeatureMgr::mv_features_no_delete(RagEdge_t* edge2, RagEdge_t* edge1)
+{
+    edge1->set_size(edge2->get_size());
+    if (edge_caches.find(edge2) != edge_caches.end()) {
+        edge_caches[edge1] = edge_caches[edge2];
+        return true;   
+    }
+    return false;
+} 
+
+
 void FeatureMgr::mv_features(RagEdge_t* edge2, RagEdge_t* edge1)
 {
     edge1->set_size(edge2->get_size());
@@ -598,6 +622,74 @@ void FeatureMgr::merge_features(RagEdge_t* edge1, RagEdge_t* edge2)
     if (edge2_caches) {
         edge_caches.erase(edge2);
     }
+}
+
+
+bool FeatureMgr::merge_features_no_delete(RagEdge_t* edge1, RagEdge_t* edge2) {
+    std::vector<void*>* edge1_caches = 0; 
+    std::vector<void*>* edge2_caches = 0;
+    
+    if (edge_caches.find(edge1) != edge_caches.end()) {
+        edge1_caches = &(edge_caches[edge1]);
+    }
+    if (edge_caches.find(edge2) != edge_caches.end()) {
+        edge2_caches = &(edge_caches[edge2]);
+    }
+
+    if (edge1_caches && edge2_caches) {
+        unsigned int pos = 0;
+        vector<double> feature_results;
+        for (int i = 0; i < num_channels; ++i) {
+            vector<FeatureCompute*>& features = channels_features[i];
+            for (int j = 0; j < features.size(); ++j) {
+                if ((*edge1_caches)[pos] && (*edge2_caches)[pos]) {
+                    features[j]->merge_cache((*edge1_caches)[pos], (*edge2_caches)[pos]);
+                }
+                ++pos;
+            }
+        }
+    }
+
+    if (edge2_caches) {
+        return true;
+    }
+
+    return false;
+}
+
+
+
+bool FeatureMgr::merge_features_no_delete(RagNode_t* node1, RagNode_t* node2) {
+    std::vector<void*>* node1_caches = 0; 
+    std::vector<void*>* node2_caches = 0;
+
+    if (node_caches.find(node1) != node_caches.end()) {
+        node1_caches = &(node_caches[node1]);
+    }
+    if (node_caches.find(node2) != node_caches.end()) {
+        node2_caches = &(node_caches[node2]);
+    }
+    if (!node1_caches && !node2_caches) {
+        return false;
+    }
+
+    unsigned int pos = 0;
+    vector<double> feature_results;
+    for (int i = 0; i < num_channels; ++i) {
+        vector<FeatureCompute*>& features = channels_features[i];
+        for (int j = 0; j < features.size(); ++j) {
+            if ((*node1_caches)[pos] && (*node2_caches)[pos]) {
+                features[j]->merge_cache((*node1_caches)[pos], (*node2_caches)[pos]);
+            }
+            ++pos;
+        }
+    }
+
+    if (node2_caches) {
+        return true;
+    }
+
+    return false;
 }
 
 void FeatureMgr::copy_channel_features(FeatureMgr *pfmgr){

@@ -183,7 +183,8 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
         // path_compress(vertex_id_map);
 
         // step 2: use vertex_id_map to update the edges
-        stack.update_edges_based_on_vertex_id_map (vertex_id_map, &node_combine_alg);
+        if (vertex_id_map.size() > 0)
+            stack.update_edges_based_on_vertex_id_map (vertex_id_map, &node_combine_alg);
     }
 
     boost::posix_time::ptime t2 = boost::posix_time::microsec_clock::local_time();

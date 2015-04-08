@@ -6,6 +6,10 @@
 #include "MergePriorityQueue.h"
 #include "../Rag/RagNodeCombineAlg.h"
 
+#include <cilk/cilk.h>
+#include <cilk/cilk_api.h>
+#include <boost/thread/mutex.hpp>
+
 namespace NeuroProof {
 
 class FeatureCombine : public RagNodeCombineAlg {
@@ -31,10 +35,52 @@ class FeatureCombine : public RagNodeCombineAlg {
                 feature_mgr->merge_features(edge_keep, edge_remove);
             } else {
                 feature_mgr->remove_edge(edge_remove);
-                std::cout << "REMOVING EDGE" << std::endl;
             }
         }
     }
+
+
+    // virtual void post_edge_join_parallel(std::set<std::pair<RagEdge<unsigned int>*, RagEdge<unsigned int>*> > &edge_pairs) {
+    virtual void post_edge_join_parallel(std::map<RagEdge<unsigned int>*, std::set<RagEdge<unsigned int>*> > &edge_pairs) {
+        if (!feature_mgr)
+            return;
+
+        boost::mutex my_lock;
+        std::vector<RagEdge<unsigned int>*> delete_vec;
+        std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator> iter_vec;
+        for (std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) 
+            iter_vec.push_back(it);
+
+        // std::cout << iter_vec.size() << std::endl;
+        cilk_for (std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator>::iterator iter = iter_vec.begin(); iter != iter_vec.end(); ++iter) {
+            std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = *iter;
+        // for (std::set<std::pair<RagEdge_t*, RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) {
+            RagEdge<unsigned int>* edge_keep = it->first;
+            for (std::set<RagEdge_t*>::iterator it2 = it->second.begin(); it2 != it->second.end(); ++it2) {
+                RagEdge<unsigned int>* edge_remove = *it2;
+                if (edge_keep->is_false_edge()) {
+                    bool del = feature_mgr->mv_features_no_delete(edge_remove, edge_keep); 
+                    if (del) {
+                        my_lock.lock();
+                        delete_vec.push_back(edge_remove);
+                        my_lock.unlock();
+                    }
+
+                } else if (!(edge_remove->is_false_edge())) {
+                    bool del = feature_mgr->merge_features_no_delete(edge_keep, edge_remove);
+                    if (del) {
+                        my_lock.lock();
+                        delete_vec.push_back(edge_remove);
+                        my_lock.unlock();
+                    }
+                }
+            }
+        }
+
+        feature_mgr->delete_edges(delete_vec);
+        delete_vec.clear();
+    }
+
 
     virtual void post_node_join(RagNode<unsigned int>* node_keep,
             RagNode<unsigned int>* node_remove)
@@ -51,6 +97,41 @@ class FeatureCombine : public RagNodeCombineAlg {
             // }
         }
     }
+
+    virtual void post_node_join_parallel(std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> > &node_pairs) {
+    // virtual void post_node_join_parallel(std::map<RagEdge<unsigned int>*, std::set<RagEdge<unsigned int>*> > &edge_pairs) {
+        if (!feature_mgr)
+            return;
+
+        boost::mutex my_lock;
+        std::vector<RagNode<unsigned int>*> node_delete_vec;
+        std::vector<RagEdge<unsigned int>*> edge_delete_vec;
+
+        cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
+            RagNode_t* node_keep = it->first;
+            RagNode_t* node_remove = it->second;
+            RagEdge_t* edge = rag->find_rag_edge_no_probe(node_keep, node_remove);
+            assert(edge);
+            bool del = feature_mgr->merge_features_no_delete(node_keep, node_remove);
+            // feature_mgr->remove_edge(edge);
+            my_lock.lock();
+            if (del) {
+                node_delete_vec.push_back(node_remove);
+            }
+            edge_delete_vec.push_back(edge);
+            my_lock.unlock();
+        }
+
+        for (std::vector<RagEdge<unsigned int>*>::iterator it = edge_delete_vec.begin(); it != edge_delete_vec.end(); ++it) {
+            feature_mgr->remove_edge(*it);
+        }
+
+        feature_mgr->delete_nodes(node_delete_vec);
+        edge_delete_vec.clear();
+        node_delete_vec.clear();
+    }
+
+
 
   protected:
     FeatureMgr* feature_mgr;
@@ -80,6 +161,40 @@ class DelayedPriorityCombine : public FeatureCombine {
             }
         }
     }
+
+    void post_node_join_parallel(std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> > &node_pairs) {
+        boost::mutex my_lock;
+        // if (node_pairs.size() > 5) {
+        if (true) {
+            cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
+                int worker_id = __cilkrts_get_worker_number();
+                RagNode<unsigned int>* node_keep = it->first;
+                for(RagNode_t::edge_iterator iter = node_keep->edge_begin();
+                        iter != node_keep->edge_end(); ++iter) {
+                    // my_lock.lock();
+                    // priority->add_dirty_edge(*iter);
+                    priority->add_dirty_edge_parallel(*iter, worker_id);
+                    // my_lock.unlock();
+                    // dirty_edges.push_back(*iter);
+
+                    RagNode_t* node = (*iter)->get_other_node(node_keep);
+                    for(RagNode_t::edge_iterator iter2 = node->edge_begin();
+                            iter2 != node->edge_end(); ++iter2) {
+                        // priority->add_dirty_edge(*iter2);
+                        // dirty_edges.push_back(*iter2);
+                        priority->add_dirty_edge_parallel(*iter, worker_id);
+                    }
+                }
+            }
+            
+            FeatureCombine::post_node_join_parallel(node_pairs);
+
+        } else {
+            for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it)
+                post_node_join(it->first, it->second);
+        }
+    }
+
   private:
     MergePriority* priority;
 

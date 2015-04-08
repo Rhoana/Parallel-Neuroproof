@@ -30,6 +30,7 @@ class MergePriority {
     virtual RagEdge_t* get_top_edge() = 0;
 
     virtual void add_dirty_edge(RagEdge_t* edge) = 0;
+    virtual void add_dirty_edge_parallel(RagEdge_t* edge, int worker_id) {}
 
     bool valid_edge(RagEdge_t* edge)
     {
@@ -87,6 +88,10 @@ class ProbPriority : public MergePriority {
     
     void set_fileid(FILE* pid){kicked_fid = pid;};
 
+    void add_dirty_edge_parallel(RagEdge_t* edge, int worker_id);
+    void initialize_dirty_edges_storage(int num_workers);
+    void erase_from_dirty_edges_storage(Node_t node1, Node_t node2);
+
   private:
 
     double threshold;
@@ -95,7 +100,9 @@ class ProbPriority : public MergePriority {
     typedef std::tr1::unordered_set<OrderedPair, OrderedPair> Dirty_t; 
     EdgeRank_t ranking;
     Dirty_t dirty_edges;
-    
+    // std::vector<std::map<unsigned int, std::map<unsigned int, bool> > > dirty_edges_storage;
+    std::vector<Dirty_t> dirty_edges_storage;
+
     FILE* kicked_fid;
 
 };

@@ -92,9 +92,11 @@ void FeatureHist::merge_cache(void * cache1, void * cache2, bool del_cache2) {
         HistCache * hist_cache1 = (HistCache*) cache1;
         HistCache * hist_cache2 = (HistCache*) cache2;
 
-        hist_cache1->count += (hist_cache2->count);
+        // hist_cache1->count += (hist_cache2->count);
+        __sync_add_and_fetch(&(hist_cache1->count), hist_cache2->count);
         for (int i = 0; i <= num_bins; ++i) {
-            hist_cache1->hist[i] += hist_cache2->hist[i];
+            // hist_cache1->hist[i] += hist_cache2->hist[i];
+            __sync_add_and_fetch(&(hist_cache1->hist[i]), hist_cache2->hist[i]);
         }
         if (del_cache2)
             delete hist_cache2;
@@ -193,9 +195,11 @@ void FeatureMoment::merge_cache(void * cache1, void * cache2, bool del_cache2){
         MomentCache * moment_cache1 = (MomentCache*) cache1;
         MomentCache * moment_cache2 = (MomentCache*) cache2;
 
-        moment_cache1->count += moment_cache2->count;
+        // moment_cache1->count += moment_cache2->count;
+        __sync_add_and_fetch(&(moment_cache1->count), moment_cache2->count);
         for (int i = 0; i < num_moments; ++i) {
             moment_cache1->vals[i] += moment_cache2->vals[i];
+            // __sync_add_and_fetch(&(moment_cache1->vals[i]), (int)moment_cache2->vals[i]);
         }
         if (del_cache2)
             delete moment_cache2;
@@ -374,7 +378,8 @@ void FeatureCount::merge_cache(void * cache1, void * cache2, bool del_cache2)
     CountCache * count_cache1 = (CountCache*) cache1;
     CountCache * count_cache2 = (CountCache*) cache2;
 
-    count_cache1->count += count_cache2->count;
+    // count_cache1->count += count_cache2->count;
+    __sync_add_and_fetch(&(count_cache1->count), count_cache2->count);
     if (del_cache2)
         delete count_cache2;
 }
