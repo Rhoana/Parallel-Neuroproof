@@ -12,6 +12,8 @@ void agglomerate_stack_parallel(Stack& stack, int num_top_edges, double threshol
 
 void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito);
 
+void agglomerate_stack_mrf_parallel(Stack& stack, int num_top_edges, double threshold, bool use_mito);
+
 void agglomerate_stack_queue(Stack& stack, double threshold, 
                                 bool use_mito, bool use_edge_weight = false);
 

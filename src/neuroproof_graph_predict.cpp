@@ -190,6 +190,11 @@ void run_prediction(PredictOptions& options)
             cout <<"Agglomerating (parallel) upto threshold "<< options.threshold << " ...";
             agglomerate_stack_parallel(stack, options.num_top_edges, options.threshold, options.merge_mito);
             break;
+        case 6:
+            cout <<"Agglomerating (mrf parallel) upto threshold "<< options.threshold << " ...";
+            agglomerate_stack_mrf_parallel(stack, options.num_top_edges, options.threshold, options.merge_mito);
+            break;
+
         default: throw ErrMsg("Illegal agglomeration type specified");
     }
     now = boost::posix_time::microsec_clock::local_time();

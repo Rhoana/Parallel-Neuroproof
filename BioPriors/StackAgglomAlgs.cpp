@@ -81,6 +81,7 @@ void agglomerate_stack(Stack& stack, double threshold,
 }
 
 
+
 inline void remove(vector<RagEdge_t*> & v, RagEdge_t* item) {
     v.erase(std::remove(v.begin(), v.end(), item), v.end());
 }
@@ -218,6 +219,56 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
     unsigned int edgeCount=0;	
 
     start = boost::posix_time::microsec_clock::local_time();
+
+    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
+        if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
+    	    double prev_val = (*iter)->get_weight();	
+            double val = feature_mgr->get_prob(*iter);
+            (*iter)->set_weight(val);
+
+            (*iter)->set_property("qloc", edgeCount);
+
+    	    // Node_t node1 = (*iter)->get_node1()->get_node_id();	
+    	    // Node_t node2 = (*iter)->get_node2()->get_node_id();	
+
+    	    edgeCount++;
+    	}
+    }
+    
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO MID LOOP: " << (now - start).total_milliseconds() << " ms\n";
+
+    start = boost::posix_time::microsec_clock::local_time();
+    agglomerate_stack(stack, threshold, use_mito, true);
+    now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
+}
+
+
+
+
+
+
+
+void agglomerate_stack_mrf_parallel(Stack& stack, int num_top_edges, double threshold, bool use_mito)
+{
+    if (threshold == 0.0) {
+        return;
+    }
+
+    boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
+    agglomerate_stack_parallel(stack, num_top_edges, 0.06, use_mito); //0.01 for 250, 0.02 for 500
+    boost::posix_time::ptime now = boost::posix_time::microsec_clock::local_time();
+    cout << endl << "------------------------ AGGLO FIRST PASS: " << (now - start).total_milliseconds() << " ms\n";
+    stack.remove_inclusions();      
+    cout <<  "Remaining regions: " << stack.get_num_labels();   
+
+    RagPtr rag = stack.get_rag();
+    FeatureMgrPtr feature_mgr = stack.get_feature_manager();
+
+    unsigned int edgeCount=0;   
+
+    start = boost::posix_time::microsec_clock::local_time();
     int num_edges = (int)rag->get_num_edges();
     vector<Rag_t::edges_iterator> iter_vec;
 
@@ -232,11 +283,6 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
             double prev_val = (*iter)->get_weight();    
             double val = feature_mgr->get_prob(*iter);
             (*iter)->set_weight(val);
-
-            // (*iter)->set_property("qloc", edgeCount);
-
-            // Node_t node1 = (*iter)->get_node1()->get_node_id();  
-            // Node_t node2 = (*iter)->get_node2()->get_node_id();  
         }
     }
 
@@ -248,30 +294,15 @@ void agglomerate_stack_mrf(Stack& stack, double threshold, bool use_mito)
         }
     }
 
-    /*
-    for (Rag_t::edges_iterator iter = rag->edges_begin(); iter != rag->edges_end(); ++iter) {
-        if ( (!(*iter)->is_preserve()) && (!(*iter)->is_false_edge()) ) {
-    	    double prev_val = (*iter)->get_weight();	
-                double val = feature_mgr->get_prob(*iter);
-                (*iter)->set_weight(val);
-
-                (*iter)->set_property("qloc", edgeCount);
-
-    	    // Node_t node1 = (*iter)->get_node1()->get_node_id();	
-    	    // Node_t node2 = (*iter)->get_node2()->get_node_id();	
-
-    	    edgeCount++;
-    	}
-    }
-    */
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO MID LOOP: " << (now - start).total_milliseconds() << " ms\n";
 
     start = boost::posix_time::microsec_clock::local_time();
-    agglomerate_stack(stack, threshold, use_mito, true);
+    agglomerate_stack_parallel(stack, num_top_edges, threshold, use_mito, true);
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ AGGLO SECOND PASS: " << (now - start).total_milliseconds() << " ms\n";
 }
+
 
 
 
