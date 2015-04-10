@@ -13,7 +13,24 @@
 
 #include <cstdio>
 
+#define MAX_NODE_LABEL 100000
+
 using namespace NeuroProof;
+
+
+inline unsigned long int pairing_func(unsigned long int num1, unsigned long int num2) {
+    if (num1 < num2)
+        return (num1 << 32) + num2;
+    return (num2 << 32) + num1;
+}
+
+
+inline void pairing_func_inverse_num1(unsigned long int pairing, unsigned int* num1, unsigned int* num2) {
+    *num1 = (unsigned int)(pairing >> 32);
+    *num2 = (unsigned int)(pairing & 0x00000000ffffffff);
+}
+
+
 
 double mito_boundary_ratio(RagEdge_t* edge)
 {
@@ -78,7 +95,7 @@ void ProbPriority::initialize_priority(double threshold_, bool use_edge_weight)
     int nworkers = __cilkrts_get_nworkers(); // CILK_NWORKERS
     initialize_dirty_edges_storage(nworkers);
     vector<int> indices_lists [nworkers];
-
+   
     cilk_for (int i = 0; i < num_edges; i++) {
     	Rag_t::edges_iterator iter = iter_vec[i];
     	
@@ -138,75 +155,77 @@ void ProbPriority::initialize_random(double pthreshold){
    
 void ProbPriority::clear_dirty()
 {
-    // cilk_for (std::vector<std::map<unsigned int, std::map<unsigned int, bool> > >::iterator it1 = dirty_edges_storage.begin(); 
-    //                                     it1 != dirty_edges_storage.end(); ++it1) {
-    //     cilk_for (std::map<unsigned int, std::map<unsigned int, bool> >::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
-    //         Node_t node1 = it2->first;
-    //         for (std::map<unsigned int, bool>::iterator it3 = it2->second.begin(); it3 != it2->second.end(); ++it3) {
-    //             if (it3->second) {
-    //                 Node_t node2 = it3->first;
-    //                 RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
-    //                 RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
+    boost::mutex ranking_lock;
 
-    //                 if (!(rag_node1 && rag_node2)) {
-    //                     continue;
-    //                 }
-    //                 RagEdge_t* rag_edge = rag->find_rag_edge_no_probe(rag_node1, rag_node2);
-
-    //                 if (!rag_edge) {
-    //                     continue;
-    //                 }
-
-    //                 // assert(rag_edge->is_dirty());
-    //                 dirty_lock.lock();
-    //                 if (!rag_edge->is_dirty()) {
-    //                     dirty_lock.unlock();
-    //                     continue;
-    //                 }
-
-    //                 rag_edge->set_dirty(false);
-    //                 dirty_lock.unlock();
-
-    //                 if (valid_edge(rag_edge)) {
-    //                     double val = feature_mgr->get_prob(rag_edge);
-    //                     rag_edge->set_weight(val);
-
-    //                     if (val <= threshold) {
-    //                         ranking_lock.lock();
-    //                         ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
-    //                         ranking_lock.unlock();
-    //                     }
-    //                     else{ 
-    //                         kicked_out++;   
-    //                         if (kicked_fid)
-    //                         fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
-    //                             node1, node2, rag_node1->get_size(), rag_node2->get_size());
-    //                     }
-    //                 }
-    //             }
-    //         }
+    // Dirty_t delete_list; // use to check if an edge is new
+    // vector<OrderedPair> delete_vec;
+    // for (std::vector<Dirty_t>::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
+    //     for (Dirty_t::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
+    //         size_t size_before = delete_list.size();
+    //         delete_list.insert(*it2);
+    //         if (size_before != delete_list.size())
+    //             delete_vec.push_back(*it2);
     //     }
     //     it1->clear();
     // }
 
+    // cilk_for (vector<OrderedPair>::iterator it = delete_vec.begin(); it != delete_vec.end(); ++it) {
+    //     Node_t node1 = it->region1;
+    //     Node_t node2 = it->region2;
+    //     RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
+    //     RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
 
-    boost::mutex ranking_lock;
+    //     if (!(rag_node1 && rag_node2)) {
+    //         continue;
+    //     }
+    //     RagEdge_t* rag_edge = rag->find_rag_edge_no_probe(rag_node1, rag_node2);
 
-    Dirty_t delete_list;
-    vector<OrderedPair> delete_vec;
-    for (std::vector<Dirty_t>::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
-        for (Dirty_t::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
-            size_t size_before = delete_list.size();
-            delete_list.insert(*it2);
-            if (size_before != delete_list.size())
+    //     if (!rag_edge) {
+    //         continue;
+    //     }
+
+    //     // assert(rag_edge->is_dirty());
+
+    //     if (!rag_edge->is_dirty()) { 
+    //         continue;
+    //     }
+
+    //     rag_edge->set_dirty(false);
+
+    //     if (valid_edge(rag_edge)) {
+    //         double val = feature_mgr->get_prob(rag_edge);
+    //         rag_edge->set_weight(val);
+
+    //         if (val <= threshold) {
+    //             ranking_lock.lock();
+    //             ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
+    //             ranking_lock.unlock();
+    //         }
+    //         else{ 
+    //         kicked_out++;   
+    //         if (kicked_fid)
+    //           fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
+    //             node1, node2, rag_node1->get_size(), rag_node2->get_size());
+    //         }
+    //     }
+    // }
+
+
+    std::tr1::unordered_set<unsigned long int> reduced_set;
+    std::vector<unsigned long int> delete_vec;
+    for (std::vector<std::tr1::unordered_set<unsigned long int> >::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
+        for (std::tr1::unordered_set<unsigned long int>::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {
+            int size_before = reduced_set.size(); 
+            reduced_set.insert(*it2);
+            if (reduced_set.size() != size_before)
                 delete_vec.push_back(*it2);
         }
         it1->clear();
     }
 
-    cilk_for (vector<OrderedPair>::iterator it = delete_vec.begin(); it != delete_vec.end(); ++it) {
-        Node_t node1 = it->region1;
-        Node_t node2 = it->region2;
+    cilk_for (vector<unsigned long int>::iterator it = delete_vec.begin(); it != delete_vec.end(); ++it) {
+        Node_t node1, node2;
+        pairing_func_inverse_num1(*it, &node1, &node2);
         RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
         RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
 
@@ -244,52 +263,6 @@ void ProbPriority::clear_dirty()
             }
         }
     }
-    
-    // cilk_for (std::vector<Dirty_t>::iterator it1 = dirty_edges_storage.begin(); it1 != dirty_edges_storage.end(); ++it1) {
-    //     for (Dirty_t::iterator it2 = it1->begin(); it2 != it1->end(); ++it2) {        
-    //         Node_t node1 = it2->region1;
-    //         Node_t node2 = it2->region2;
-    //         RagNode_t* rag_node1 = rag->find_rag_node(node1); 
-    //         RagNode_t* rag_node2 = rag->find_rag_node(node2); 
-
-    //         if (!(rag_node1 && rag_node2)) {
-    //             continue;
-    //         }
-    //         RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
-
-    //         if (!rag_edge) {
-    //             continue;
-    //         }
-
-    //         // assert(rag_edge->is_dirty());
-    //         dirty_lock.lock();
-    //         if (!rag_edge->is_dirty()) { 
-    //             dirty_lock.unlock();
-    //             continue;
-    //         }
-
-    //         rag_edge->set_dirty(false);
-    //         dirty_lock.unlock();
-
-    //         if (valid_edge(rag_edge)) {
-    //             double val = feature_mgr->get_prob(rag_edge);
-    //             rag_edge->set_weight(val);
-
-    //             if (val <= threshold) {
-    //                 ranking_lock.lock();
-    //                 ranking.insert(std::make_pair(val, std::make_pair(node1, node2)));
-    //                 ranking_lock.unlock();
-    //             }
-    //             else{ 
-    //             kicked_out++;   
-    //             if (kicked_fid)
-    //               fprintf(kicked_fid, "0 %f %u %u %lu %lu\n", val,
-    //                 node1, node2, rag_node1->get_size(), rag_node2->get_size());
-    //             }
-    //         }
-    //     }
-    //     it1->clear();
-    // }
 }
 
 
@@ -302,8 +275,8 @@ bool ProbPriority::empty()
 }
 
 boost::mutex mu;
-boost::mutex mu1;
-boost::mutex mu2;
+boost::mutex mu1; // for ranking
+boost::mutex mu2; // for dirty storage
 RagEdge_t* ProbPriority::get_edge_with_iter(EdgeRank_t::iterator iter)
 {
     if (ranking.empty())
@@ -330,13 +303,13 @@ RagEdge_t* ProbPriority::get_edge_with_iter(EdgeRank_t::iterator iter)
     ranking.erase(iter);
     mu1.unlock();
 
-    RagNode_t* rag_node1 = rag->find_rag_node(node1); 
-    RagNode_t* rag_node2 = rag->find_rag_node(node2); 
+    RagNode_t* rag_node1 = rag->find_rag_node_no_probe(node1); 
+    RagNode_t* rag_node2 = rag->find_rag_node_no_probe(node2); 
 
     if (!(rag_node1 && rag_node2)) {
         return 0;
     }
-    RagEdge_t* rag_edge = rag->find_rag_edge(rag_node1, rag_node2);
+    RagEdge_t* rag_edge = rag->find_rag_edge_no_probe(rag_node1, rag_node2);
 
     if (!rag_edge) {
         return 0;
@@ -558,20 +531,19 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
     }
 
     // do priority updates to see which edges can be processed
-    int max_labels = 100000;
 
-    // int node_priority_update_array_1 [max_labels];
-    // int node_priority_update_array_2 [max_labels];
+    // int node_priority_update_array_1 [MAX_NODE_LABEL];
+    // int node_priority_update_array_2 [MAX_NODE_LABEL];
 
-    // for (int i = 0; i < max_labels; ++i) {
+    // for (int i = 0; i < MAX_NODE_LABEL; ++i) {
     //     node_priority_update_array_1[i] = nbd_size + 1;
     //     node_priority_update_array_2[i] = nbd_size + 1;
     // }
 
-    unsigned int* node_priority_update_array_1 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
-    unsigned int* node_priority_update_array_2 = (unsigned int*)calloc(max_labels, sizeof(unsigned int));
+    unsigned int* node_priority_update_array_1 = (unsigned int*)calloc(MAX_NODE_LABEL, sizeof(unsigned int));
+    unsigned int* node_priority_update_array_2 = (unsigned int*)calloc(MAX_NODE_LABEL, sizeof(unsigned int));
 
-    cilk_for (int i = 0; i < top_edges.size(); ++i) {
+    for (int i = 0; i < top_edges.size(); ++i) {
         Node_t node1 = (*top_edges[i]).second.first;
         Node_t node2 = (*top_edges[i]).second.second;
 
@@ -582,17 +554,12 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
     }
 
     // check which edge can be processed
-    // vector<RagEdge_t*> edges_to_process;
-    // cout << "NUM TOP EDGES: " << top_edges.size() << endl;
-
-
 
     vector<EdgeRank_t::iterator> edges_to_remove_from_queue;
 
     for (int i = 0; i < top_edges.size(); ++i) {
         Node_t node1 = (*top_edges[i]).second.first;
         Node_t node2 = (*top_edges[i]).second.second;
-        // TODO: else do we reset the priority of the first array at those locations?
         if (node_priority_update_array_1[(int)node1] == node_priority_update_array_1[(int)node2]) {
             edges_to_remove_from_queue.push_back(top_edges[i]);
         }
@@ -697,7 +664,6 @@ void ProbPriority::get_top_independent_edges (int nbd_size, vector<RagEdge_t*> &
 
     free(node_priority_update_array_1);
     free(node_priority_update_array_2);
-    // return edges_to_process;
 }
 
 
@@ -766,6 +732,8 @@ RagEdge_t* ProbPriority::get_top_edge()
     return rag_edge; 
 }
 
+
+// this ig probably not used anymore
 void ProbPriority::add_dirty_edge(RagEdge_t* edge)
 {
     if (valid_edge(edge)) {
@@ -775,43 +743,46 @@ void ProbPriority::add_dirty_edge(RagEdge_t* edge)
 }
 
 
+
+
 void ProbPriority::add_dirty_edge_parallel(RagEdge_t* edge, int worker_id)
 {
     // if (valid_edge(edge)) {
     //     edge->set_dirty(true);
     //     int node1 = edge->get_node1()->get_node_id();
     //     int node2 = edge->get_node2()->get_node_id();
-    //     dirty_edges_storage[worker_id][node1][node2] = true;
+    //     dirty_edges_storage[worker_id].insert(OrderedPair(node1, node2));
     // }
-
+    
     if (valid_edge(edge)) {
         edge->set_dirty(true);
         int node1 = edge->get_node1()->get_node_id();
         int node2 = edge->get_node2()->get_node_id();
-        dirty_edges_storage[worker_id].insert(OrderedPair(node1, node2));
+        dirty_edges_storage[worker_id].insert(pairing_func(node1, node2));
     }
 }
 
 
+
 void ProbPriority::initialize_dirty_edges_storage(int num_workers) {
+    set_nworkers(num_workers);
     for (int i = 0; i < num_workers; ++i) {
-        // std::map<unsigned int, std::map<unsigned int, bool> > map_item;
-        Dirty_t map_item;
+        // Dirty_t map_item;
+        std::tr1::unordered_set<unsigned long int> map_item;
         dirty_edges_storage.push_back(map_item);
     }
 }
 
 
 void ProbPriority::erase_from_dirty_edges_storage(Node_t node1, Node_t node2) {
-    // for (std::vector<std::map<unsigned int, std::map<unsigned int, bool> > >::iterator it = dirty_edges_storage.begin(); 
+    // for (std::vector<Dirty_t>::iterator it = dirty_edges_storage.begin(); 
     //                                         it != dirty_edges_storage.end(); ++it) {
-    //     if (it->find(node1) != it->end())
-    //         (*it)[node1][node2] = false;
-    // }   
-    for (std::vector<Dirty_t>::iterator it = dirty_edges_storage.begin(); 
-                                            it != dirty_edges_storage.end(); ++it) {
-        it->erase(OrderedPair(node1, node2));
-    } 
+    //     it->erase(OrderedPair(node1, node2));
+    // }
+
+    unsigned long int pairing = pairing_func(node1, node2);
+    for (std::vector<std::tr1::unordered_set<unsigned long int> >::iterator it = dirty_edges_storage.begin(); it != dirty_edges_storage.end(); ++it)
+        it->erase(pairing);
 }
 
 

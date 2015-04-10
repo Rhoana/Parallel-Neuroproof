@@ -40,46 +40,64 @@ class FeatureCombine : public RagNodeCombineAlg {
     }
 
 
-    // virtual void post_edge_join_parallel(std::set<std::pair<RagEdge<unsigned int>*, RagEdge<unsigned int>*> > &edge_pairs) {
+    
     virtual void post_edge_join_parallel(std::map<RagEdge<unsigned int>*, std::set<RagEdge<unsigned int>*> > &edge_pairs) {
+        // std::cout << "EDGES: " << edge_pairs.size() << std::endl;
         if (!feature_mgr)
             return;
 
-        boost::mutex my_lock;
-        std::vector<RagEdge<unsigned int>*> delete_vec;
-        std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator> iter_vec;
-        for (std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) 
-            iter_vec.push_back(it);
+        if (edge_pairs.size() > 5) {
+            int num_workers = __cilkrts_get_nworkers();
+            std::vector<RagEdge<unsigned int>*> delete_vec [num_workers];
+            std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator> iter_vec;
+            for (std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) 
+                iter_vec.push_back(it);
 
-        // std::cout << iter_vec.size() << std::endl;
-        cilk_for (std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator>::iterator iter = iter_vec.begin(); iter != iter_vec.end(); ++iter) {
-            std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = *iter;
-        // for (std::set<std::pair<RagEdge_t*, RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) {
-            RagEdge<unsigned int>* edge_keep = it->first;
-            for (std::set<RagEdge_t*>::iterator it2 = it->second.begin(); it2 != it->second.end(); ++it2) {
-                RagEdge<unsigned int>* edge_remove = *it2;
-                if (edge_keep->is_false_edge()) {
-                    bool del = feature_mgr->mv_features_no_delete(edge_remove, edge_keep); 
-                    if (del) {
-                        my_lock.lock();
-                        delete_vec.push_back(edge_remove);
-                        my_lock.unlock();
+            cilk_for (std::vector<std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator>::iterator iter = iter_vec.begin(); iter != iter_vec.end(); ++iter) {
+                int worker_id = __cilkrts_get_worker_number();
+                std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = *iter;
+            // for (std::set<std::pair<RagEdge_t*, RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) {
+                RagEdge<unsigned int>* edge_keep = it->first;
+                for (std::set<RagEdge_t*>::iterator it2 = it->second.begin(); it2 != it->second.end(); ++it2) {
+                    RagEdge<unsigned int>* edge_remove = *it2;
+                    if (edge_keep->is_false_edge()) {
+                        // feature_mgr->mv_features(edge_remove, edge_keep);
+                        bool del = feature_mgr->mv_features_no_delete(edge_remove, edge_keep); 
+                        if (del) {
+                            delete_vec[worker_id].push_back(edge_remove);
+                        }
+
+                    } else if (!(edge_remove->is_false_edge())) {
+                        // feature_mgr->merge_features(edge_keep, edge_remove);
+                        bool del = feature_mgr->merge_features_no_delete(edge_keep, edge_remove);
+                        if (del) {
+                            delete_vec[worker_id].push_back(edge_remove);
+                        }
                     }
+                }
+            }
 
-                } else if (!(edge_remove->is_false_edge())) {
-                    bool del = feature_mgr->merge_features_no_delete(edge_keep, edge_remove);
-                    if (del) {
-                        my_lock.lock();
-                        delete_vec.push_back(edge_remove);
-                        my_lock.unlock();
+            for (int i = 0; i < num_workers; ++i) {
+                feature_mgr->delete_edges(delete_vec[i]);
+                delete_vec[i].clear();
+            }
+
+        } else {
+            for (std::map<RagEdge_t*, std::set<RagEdge_t*> >::iterator it = edge_pairs.begin(); it != edge_pairs.end(); ++it) {
+                RagEdge<unsigned int>* edge_keep = it->first;
+                for (std::set<RagEdge_t*>::iterator it2 = it->second.begin(); it2 != it->second.end(); ++it2) {
+                    RagEdge<unsigned int>* edge_remove = *it2;
+                    if (edge_keep->is_false_edge()) {
+                        feature_mgr->mv_features(edge_remove, edge_keep);
+
+                    } else if (!(edge_remove->is_false_edge())) {
+                        feature_mgr->merge_features(edge_keep, edge_remove);
                     }
                 }
             }
         }
-
-        feature_mgr->delete_edges(delete_vec);
-        delete_vec.clear();
     }
+
 
 
     virtual void post_node_join(RagNode<unsigned int>* node_keep,
@@ -90,45 +108,55 @@ class FeatureCombine : public RagNodeCombineAlg {
             assert(edge);
             feature_mgr->merge_features(node_keep, node_remove);
             feature_mgr->remove_edge(edge);
-            // if (edge) {
-            //     feature_mgr->remove_edge(edge);
-            // } else {
-            //     cout << endl << endl << endl << endl << endl << endl << "ASSERT FAILED!!!" << endl << endl << endl << endl << endl << endl;
-            // }
         }
     }
 
+
+
     virtual void post_node_join_parallel(std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> > &node_pairs) {
-    // virtual void post_node_join_parallel(std::map<RagEdge<unsigned int>*, std::set<RagEdge<unsigned int>*> > &edge_pairs) {
+        // std::cout << "NODES: " << node_pairs.size() << std::endl;
         if (!feature_mgr)
             return;
 
-        boost::mutex my_lock;
-        std::vector<RagNode<unsigned int>*> node_delete_vec;
-        std::vector<RagEdge<unsigned int>*> edge_delete_vec;
-
-        cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
-            RagNode_t* node_keep = it->first;
-            RagNode_t* node_remove = it->second;
-            RagEdge_t* edge = rag->find_rag_edge_no_probe(node_keep, node_remove);
-            assert(edge);
-            bool del = feature_mgr->merge_features_no_delete(node_keep, node_remove);
-            // feature_mgr->remove_edge(edge);
-            my_lock.lock();
-            if (del) {
-                node_delete_vec.push_back(node_remove);
+        if (node_pairs.size() > 10) {
+            int num_workers = __cilkrts_get_nworkers();
+            std::vector<RagNode<unsigned int>*> node_delete_vec [num_workers];
+            std::vector<RagEdge<unsigned int>*> edge_delete_vec [num_workers];
+            cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
+                int worker_id = __cilkrts_get_worker_number();
+                RagNode_t* node_keep = it->first;
+                RagNode_t* node_remove = it->second;
+                RagEdge_t* edge = rag->find_rag_edge_no_probe(node_keep, node_remove);
+                assert(edge);
+                // feature_mgr->merge_features(node_keep, node_remove);
+                bool del = feature_mgr->merge_features_no_delete(node_keep, node_remove);
+                // feature_mgr->remove_edge(edge);
+                if (del) {
+                    node_delete_vec[worker_id].push_back(node_remove);
+                }
+                edge_delete_vec[worker_id].push_back(edge);
             }
-            edge_delete_vec.push_back(edge);
-            my_lock.unlock();
-        }
 
-        for (std::vector<RagEdge<unsigned int>*>::iterator it = edge_delete_vec.begin(); it != edge_delete_vec.end(); ++it) {
-            feature_mgr->remove_edge(*it);
-        }
+            for (int i = 0; i < num_workers; ++i) {
+                for (std::vector<RagEdge<unsigned int>*>::iterator it = edge_delete_vec[i].begin(); it != edge_delete_vec[i].end(); ++it) {
+                    feature_mgr->remove_edge(*it);
+                }
 
-        feature_mgr->delete_nodes(node_delete_vec);
-        edge_delete_vec.clear();
-        node_delete_vec.clear();
+                feature_mgr->delete_nodes(node_delete_vec[i]);
+                edge_delete_vec[i].clear();
+                node_delete_vec[i].clear();
+            }
+
+        } else {
+            for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
+                RagNode_t* node_keep = it->first;
+                RagNode_t* node_remove = it->second;
+                RagEdge_t* edge = rag->find_rag_edge(node_keep, node_remove);
+                assert(edge);
+                feature_mgr->merge_features(node_keep, node_remove);
+                feature_mgr->remove_edge(edge);
+            }
+        }
     }
 
 
@@ -150,49 +178,37 @@ class DelayedPriorityCombine : public FeatureCombine {
     {
         FeatureCombine::post_node_join(node_keep, node_remove);
         
+        int num_workers = priority->get_nworkers();
         for(RagNode_t::edge_iterator iter = node_keep->edge_begin();
                 iter != node_keep->edge_end(); ++iter) {
-            priority->add_dirty_edge(*iter);
+            priority->add_dirty_edge_parallel(*iter, rand() % num_workers);
 
             RagNode_t* node = (*iter)->get_other_node(node_keep);
             for(RagNode_t::edge_iterator iter2 = node->edge_begin();
                     iter2 != node->edge_end(); ++iter2) {
-                priority->add_dirty_edge(*iter2);
+                priority->add_dirty_edge_parallel(*iter2, rand() % num_workers);
             }
         }
     }
 
     void post_node_join_parallel(std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> > &node_pairs) {
-        boost::mutex my_lock;
-        // if (node_pairs.size() > 5) {
-        if (true) {
-            cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
-                int worker_id = __cilkrts_get_worker_number();
-                RagNode<unsigned int>* node_keep = it->first;
-                for(RagNode_t::edge_iterator iter = node_keep->edge_begin();
-                        iter != node_keep->edge_end(); ++iter) {
-                    // my_lock.lock();
-                    // priority->add_dirty_edge(*iter);
-                    priority->add_dirty_edge_parallel(*iter, worker_id);
-                    // my_lock.unlock();
-                    // dirty_edges.push_back(*iter);
 
-                    RagNode_t* node = (*iter)->get_other_node(node_keep);
-                    for(RagNode_t::edge_iterator iter2 = node->edge_begin();
-                            iter2 != node->edge_end(); ++iter2) {
-                        // priority->add_dirty_edge(*iter2);
-                        // dirty_edges.push_back(*iter2);
-                        priority->add_dirty_edge_parallel(*iter, worker_id);
-                    }
+        cilk_for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it) {
+            int worker_id = __cilkrts_get_worker_number();
+            RagNode<unsigned int>* node_keep = it->first;
+            for(RagNode_t::edge_iterator iter = node_keep->edge_begin();
+                    iter != node_keep->edge_end(); ++iter) {
+                priority->add_dirty_edge_parallel(*iter, worker_id);
+
+                RagNode_t* node = (*iter)->get_other_node(node_keep);
+                for(RagNode_t::edge_iterator iter2 = node->edge_begin();
+                        iter2 != node->edge_end(); ++iter2) {
+                    priority->add_dirty_edge_parallel(*iter, worker_id);
                 }
             }
-            
-            FeatureCombine::post_node_join_parallel(node_pairs);
-
-        } else {
-            for (std::vector<std::pair<RagNode<unsigned int>*, RagNode<unsigned int>*> >::iterator it = node_pairs.begin(); it != node_pairs.end(); ++it)
-                post_node_join(it->first, it->second);
         }
+        
+        FeatureCombine::post_node_join_parallel(node_pairs);
     }
 
   private:

@@ -54,6 +54,10 @@ class MergePriority {
     virtual int get_kout() {return 0;}; 	
     virtual void set_fileid(FILE* pid) {};
 
+    // for parallel storage structure
+    int get_nworkers(){return nworkers;};
+    void set_nworkers(int num_w){nworkers = num_w;};
+
   protected:
     Rag_t* rag;
     FeatureMgr* feature_mgr;
@@ -61,6 +65,7 @@ class MergePriority {
 
   private:
     bool synapse_mode;    
+    int nworkers;
 
 };
 
@@ -92,6 +97,23 @@ class ProbPriority : public MergePriority {
     void initialize_dirty_edges_storage(int num_workers);
     void erase_from_dirty_edges_storage(Node_t node1, Node_t node2);
 
+    // inline void add_dirty_edge_parallel(RagEdge_t* edge, int worker_id)
+    // {
+    //     // if (valid_edge(edge)) {
+    //     //     edge->set_dirty(true);
+    //     //     int node1 = edge->get_node1()->get_node_id();
+    //     //     int node2 = edge->get_node2()->get_node_id();
+    //     //     dirty_edges_storage[worker_id][node1][node2] = true;
+    //     // }
+
+    //     if (valid_edge(edge)) {
+    //         edge->set_dirty(true);
+    //         int node1 = edge->get_node1()->get_node_id();
+    //         int node2 = edge->get_node2()->get_node_id();
+    //         dirty_edges_storage[worker_id].insert(OrderedPair(node1, node2));
+    //     }
+    // }
+
   private:
 
     double threshold;
@@ -100,8 +122,8 @@ class ProbPriority : public MergePriority {
     typedef std::tr1::unordered_set<OrderedPair, OrderedPair> Dirty_t; 
     EdgeRank_t ranking;
     Dirty_t dirty_edges;
-    // std::vector<std::map<unsigned int, std::map<unsigned int, bool> > > dirty_edges_storage;
-    std::vector<Dirty_t> dirty_edges_storage;
+    // std::vector<Dirty_t> dirty_edges_storage;
+    std::vector<std::tr1::unordered_set<unsigned long int> > dirty_edges_storage;
 
     FILE* kicked_fid;
 

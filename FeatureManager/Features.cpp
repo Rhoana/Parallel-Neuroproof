@@ -1,5 +1,6 @@
 #include "Features.h"
 #include <iostream>
+#include <boost/thread/mutex.hpp>
 
 using namespace NeuroProof;
 using std::cout;
@@ -191,16 +192,19 @@ void  FeatureMoment::get_diff_feature_array(void* cache2, void * cache1, std::ve
         }
 } 
 
+// boost::mutex moment_lock;
 void FeatureMoment::merge_cache(void * cache1, void * cache2, bool del_cache2){
         MomentCache * moment_cache1 = (MomentCache*) cache1;
         MomentCache * moment_cache2 = (MomentCache*) cache2;
 
         // moment_cache1->count += moment_cache2->count;
         __sync_add_and_fetch(&(moment_cache1->count), moment_cache2->count);
+        // moment_lock.lock();
         for (int i = 0; i < num_moments; ++i) {
             moment_cache1->vals[i] += moment_cache2->vals[i];
             // __sync_add_and_fetch(&(moment_cache1->vals[i]), (int)moment_cache2->vals[i]);
         }
+        // moment_lock.unlock();
         if (del_cache2)
             delete moment_cache2;
 }

@@ -52,10 +52,9 @@ void rag_join_nodes_for_parallel(Rag<Index_t>& rag, Index_t label_remove, Index_
         RagNodeCombineAlg* combine_alg);
 
 
-void update_new_edges_and_data(Rag<Index_t>& rag, RagNode<Index_t>* node_remove, RagNode<Index_t>* node_keep, 
-                            std::map<Index_t, Index_t> &vertex_id_map, RagNodeCombineAlg* combine_alg);
 
 void update_new_edges (Rag<Index_t>& rag, std::map<Index_t, Index_t>& vertex_id_map, RagNodeCombineAlg* combine_alg); 
+void update_new_edges_serial (Rag<Index_t>& rag, std::map<Index_t, Index_t>& vertex_id_map, RagNodeCombineAlg* combine_alg); 
 
 
 /*!

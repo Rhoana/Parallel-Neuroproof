@@ -909,21 +909,6 @@ void Stack::update_edges_based_on_vertex_id_map(map<Label_t, Label_t> &vertex_id
     // make sure to remove edges from this map before deleting anything
     map<RagEdge_t*, vector<RagEdge_t*> > edge_dependency_map;
     update_new_edges(*rag, vertex_id_map, combine_alg);
-    // for (map<Label_t, Label_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
-    //     if (it->first == it->second)
-    //         continue;
-
-    //     RagNode_t* node_remove = rag->find_rag_node_no_probe(it->first);
-    //     RagNode_t* node_keep   = rag->find_rag_node_no_probe(it->second);
-    //     // go through neighbors of node_remove
-    //     update_new_edges_and_data(*rag, node_remove, node_keep, vertex_id_map, combine_alg);
-    // }
-
-    // for (map<Label_t, Label_t>::iterator it = vertex_id_map.begin(); it != vertex_id_map.end(); ++it) {
-    //     if (it->first == it->second)
-    //         continue;
-    //     rag->remove_rag_node(rag->find_rag_node(it->first));  
-    // }
 }
 
 
@@ -941,16 +926,13 @@ bool Stack::merge_node_data_only(Label_t label_remove, Label_t label_keep, RagNo
         // }
         merged = true;
     }    
-    
+
     update_assignment(label_remove, label_keep);
     labelvol->reassign_label(label_remove, label_keep); 
     return merged;
 }
 
 
-boost::mutex mu;
-boost::mutex mu1;
-boost::mutex mu2;
 
 void Stack::merge_labels(Label_t label_remove, Label_t label_keep,
         RagNodeCombineAlg* combine_alg, bool ignore_rag)
@@ -961,25 +943,13 @@ void Stack::merge_labels(Label_t label_remove, Label_t label_keep,
 
     // update rag by merging nodes
     if (!ignore_rag && rag) {
-        mu.lock();
-        rag_join_nodes_for_parallel(*rag, label_remove, label_keep, combine_alg); 
-        mu.unlock();
-
-        // mu.lock();
-        // rag_join_nodes(*rag, rag->find_rag_node(label_keep),
-        //     rag->find_rag_node(label_remove), combine_alg);  
-        // mu.unlock();
+        rag_join_nodes(*rag, rag->find_rag_node(label_keep),
+            rag->find_rag_node(label_remove), combine_alg);  
     } 
 
     // might be unnecessary, does nothing without ground truth
-    mu1.lock();
     update_assignment(label_remove, label_keep);
-    // mu1.unlock();
-
-    // mu2.lock();   
     labelvol->reassign_label(label_remove, label_keep); 
-    // mu2.unlock();
-    mu1.unlock(); 
 }
 
 VolumeLabelPtr Stack::generate_boundary(VolumeLabelPtr labelvolh)
